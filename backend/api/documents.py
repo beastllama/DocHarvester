@@ -10,8 +10,8 @@ from backend.database import get_db
 from backend.models import Document, DocumentChunk, Project, User
 from backend.api.auth import get_current_user
 from backend.api.deps import accessible_project_ids, get_project_for_user, is_project_member
-from backend.services.embeddings import EmbeddingError, EmbeddingService
-from starlette.concurrency import run_in_threadpool
+from backend.services.embeddings import EmbeddingError
+from backend.services.semantic_search import search_chunks
 
 
 router = APIRouter()
@@ -244,67 +244,23 @@ async def semantic_search(
     if project_id:
         await get_project_for_user(project_id, db, current_user)
     allowed_ids = await accessible_project_ids(db, current_user)
-    
-    # Initialize embedding service
+
     try:
-        embedding_service = await run_in_threadpool(EmbeddingService)
-        query_embedding = await run_in_threadpool(embedding_service.get_embedding, query)
+        results = await search_chunks(
+            db,
+            query,
+            limit=limit,
+            project_id=project_id,
+            lens_type=lens_type,
+            allowed_project_ids=allowed_ids,
+        )
     except EmbeddingError as e:
         raise HTTPException(status_code=503, detail=str(e))
-    
-    # Generate query embedding
-    
-    # Build vector similarity search
-    # Using pgvector's <-> operator for cosine distance
-    base_query = select(
-        DocumentChunk,
-        Document,
-        (1 - DocumentChunk.embedding.cosine_distance(query_embedding)).label('similarity')
-    ).join(Document)
-    
-    # Apply filters
-    if project_id:
-        base_query = base_query.filter(Document.project_id == project_id)
-    
-    # Only search documents from projects the user can access (None = admin, no filter)
-    if allowed_ids is not None:
-        base_query = base_query.filter(Document.project_id.in_(allowed_ids))
-    
-    if lens_type:
-        base_query = base_query.filter(DocumentChunk.lens_type == lens_type)
-    
-    # Order by similarity and limit
-    # Smallest cosine distance first, so the most similar chunks come first
-    base_query = base_query.order_by(DocumentChunk.embedding.cosine_distance(query_embedding)).limit(limit)
-    
-    result = await db.execute(base_query)
-    
-    search_results = []
-    for row in result:
-        chunk = row[0]
-        doc = row[1]
-        similarity = row[2]
-        
-        search_results.append({
-            "document": {
-                "id": doc.id,
-                "title": doc.title,
-                "source_type": doc.source_type,
-                "file_type": doc.file_type
-            },
-            "chunk": {
-                "id": chunk.id,
-                "text": chunk.text[:200] + "..." if len(chunk.text) > 200 else chunk.text,
-                "lens_type": chunk.lens_type,
-                "chunk_index": chunk.chunk_index
-            },
-            "similarity": float(similarity)
-        })
-    
+
     return {
         "query": query,
-        "results": search_results,
-        "count": len(search_results)
+        "results": results,
+        "count": len(results)
     }
 
 

@@ -1,16 +1,23 @@
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.config import settings
 from backend.database import get_db
-from backend.models import User
+from backend.models import ApiToken, User
+from backend.services.api_tokens import (
+    create_api_token,
+    is_api_token,
+    list_api_tokens,
+    revoke_api_token,
+    user_for_api_token,
+)
 
 
 router = APIRouter()
@@ -77,6 +84,13 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     
+    # Personal API tokens (dh_...) are checked by hash, against revocation and the user's active flag
+    if is_api_token(token):
+        user = await user_for_api_token(db, token)
+        if user is None:
+            raise credentials_exception
+        return user
+
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
         email: str = payload.get("sub")
@@ -91,7 +105,8 @@ async def get_current_user(
     )
     user = result.scalar_one_or_none()
     
-    if user is None:
+    # Deactivated users lose access on their next request, even with a login token that has not expired
+    if user is None or not user.is_active:
         raise credentials_exception
     
     return user
@@ -173,4 +188,65 @@ async def read_users_me(
     current_user: User = Depends(get_current_user)
 ):
     """Get current user info"""
-    return current_user 
+    return current_user
+
+
+class ApiTokenCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class ApiTokenInfo(BaseModel):
+    id: int
+    name: str
+    created_at: datetime
+    last_used_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+
+
+class ApiTokenCreated(ApiTokenInfo):
+    token: str  # Shown once. It is stored only as a hash, so it cannot be shown again.
+
+
+def _token_info(row: ApiToken) -> ApiTokenInfo:
+    return ApiTokenInfo(
+        id=row.id,
+        name=row.name,
+        created_at=row.created_at,
+        last_used_at=row.last_used_at,
+        revoked_at=row.revoked_at,
+    )
+
+
+@router.post("/tokens", response_model=ApiTokenCreated)
+async def create_token(
+    payload: ApiTokenCreate,
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a personal API token for an MCP client. Needs a password login: a token cannot mint tokens."""
+    if is_api_token(token):
+        raise HTTPException(status_code=403, detail="Log in with your password to create a token")
+    row, plaintext = await create_api_token(db, current_user, payload.name)
+    return ApiTokenCreated(**_token_info(row).model_dump(), token=plaintext)
+
+
+@router.get("/tokens", response_model=List[ApiTokenInfo])
+async def list_tokens(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """List your API tokens. Plaintext values are never returned."""
+    return [_token_info(row) for row in await list_api_tokens(db, current_user)]
+
+
+@router.delete("/tokens/{token_id}")
+async def revoke_token(
+    token_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Revoke one of your API tokens. It stops working on the next request."""
+    if not await revoke_api_token(db, current_user, token_id):
+        raise HTTPException(status_code=404, detail="Token not found")
+    return {"revoked": token_id} 

@@ -190,6 +190,36 @@ EMBEDDING_DIMENSION=768
 - Changing the embedding model or the dimension means re-embedding: `python backend/scripts/reembed.py`.
 - Provider switches made in the admin screen are stored in the database, so the workers follow them.
 
+## 🤖 Hermes Agent (MCP)
+
+Hermes Agent can search your projects through a read-only MCP server at `/mcp`. Each call uses the token's user, so Hermes sees only what that user can see.
+
+1. Log in with your password and create a token. The value is shown once:
+   ```bash
+   curl -X POST http://localhost:8000/api/v1/auth/tokens \
+     -H "Authorization: Bearer YOUR_LOGIN_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"name": "hermes"}'
+   ```
+2. Add this to `~/.hermes/config.yaml`:
+   ```yaml
+   mcp_servers:
+     docharvester:
+       url: "http://localhost:8000/mcp"
+       headers:
+         Authorization: "Bearer dh_your_token_here"
+       tools:
+         include: ["list_projects", "search_documents", "get_document", "get_wiki_page", "related_entities"]
+   ```
+3. Optional: use the same local model for Hermes chat. Pull it, then set `LOCAL_LLM_MODEL=hermes3:8b`:
+   ```bash
+   docker compose exec ollama ollama pull hermes3:8b
+   ```
+
+- Tools: `list_projects`, `search_documents`, `get_document`, `get_wiki_page`, `related_entities`. There are no write tools.
+- Revoke a token with `DELETE /api/v1/auth/tokens/{id}`. It stops working on the next request.
+- The server accepts only `localhost` and `127.0.0.1` as host names (MCP DNS-rebinding protection). Hermes must connect from the same machine.
+
 ## 🔒 Security
 
 **Important Security Notes:**
