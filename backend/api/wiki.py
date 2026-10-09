@@ -5,9 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
 from backend.database import get_db
-from backend.models import WikiPage, WikiStructure, Project
+from backend.models import WikiPage, WikiStructure
 from backend.services.wiki_generator import WikiGenerator
 from backend.api.auth import get_current_user, User
+from backend.api.deps import get_project_for_user
 
 
 router = APIRouter(tags=["wiki"])
@@ -23,14 +24,8 @@ async def generate_wiki(
     """Generate wiki for a project with progress tracking"""
     try:
         # Check project exists and user has access
-        result = await db.execute(
-            select(Project).where(Project.id == project_id)
-        )
-        project = result.scalar_one_or_none()
-        
-        if not project:
-            raise HTTPException(status_code=404, detail="Project not found")
-        
+        await get_project_for_user(project_id, db, current_user)
+
         print(f"� API: Starting wiki generation for project {project_id}")
         
         # Generate wiki with progress tracking - pass user_id
@@ -85,6 +80,8 @@ async def get_wiki_structure(
     current_user: User = Depends(get_current_user)
 ):
     """Get wiki structure for a project"""
+    await get_project_for_user(project_id, db, current_user)
+
     result = await db.execute(
         select(WikiStructure).where(WikiStructure.project_id == project_id)
     )
@@ -109,6 +106,8 @@ async def get_wiki_pages(
     current_user: User = Depends(get_current_user)
 ):
     """Get wiki pages for a project"""
+    await get_project_for_user(project_id, db, current_user)
+
     query = select(WikiPage).where(WikiPage.project_id == project_id)
     
     if parent_id is not None:
@@ -149,6 +148,8 @@ async def get_wiki_page(
     current_user: User = Depends(get_current_user)
 ):
     """Get a specific wiki page by slug"""
+    await get_project_for_user(project_id, db, current_user)
+
     result = await db.execute(
         select(WikiPage).where(
             and_(
@@ -217,6 +218,8 @@ async def search_wiki(
     current_user: User = Depends(get_current_user)
 ):
     """Search wiki pages"""
+    await get_project_for_user(project_id, db, current_user)
+
     # Simple text search - in production use full-text search or embeddings
     result = await db.execute(
         select(WikiPage)
@@ -263,7 +266,9 @@ async def update_wiki_page(
     
     if not page:
         raise HTTPException(status_code=404, detail="Wiki page not found")
-    
+
+    await get_project_for_user(page.project_id, db, current_user)
+
     # Update page
     page.content = content
     if summary:
@@ -314,7 +319,8 @@ async def get_wiki_generation_status(
     current_user: User = Depends(get_current_user)
 ):
     """Get the current status of wiki generation for a project"""
-    
+    await get_project_for_user(project_id, db, current_user)
+
     # Import here to avoid circular imports
     from backend.services.progress_tracker import progress_tracker
     

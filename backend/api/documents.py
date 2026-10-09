@@ -9,6 +9,7 @@ from datetime import datetime
 from backend.database import get_db
 from backend.models import Document, DocumentChunk, Project, User
 from backend.api.auth import get_current_user
+from backend.api.deps import accessible_project_ids, get_project_for_user, is_project_member
 from backend.services.embeddings import EmbeddingService
 
 
@@ -79,7 +80,13 @@ async def search_documents(
     filters = []
     
     if project_id:
+        await get_project_for_user(project_id, db, current_user)
         filters.append(Document.project_id == project_id)
+    
+    # Only return documents from projects the user can access (None = admin, no filter)
+    allowed_ids = await accessible_project_ids(db, current_user)
+    if allowed_ids is not None:
+        filters.append(Document.project_id.in_(allowed_ids))
     
     if file_type:
         filters.append(Document.file_type == file_type)
@@ -156,6 +163,7 @@ async def get_document(
     
     doc = row[0]
     chunk_count = row[1]
+    await get_project_for_user(doc.project_id, db, current_user)
     
     return DocumentResponse(
         **doc.__dict__,
@@ -177,6 +185,8 @@ async def get_document_content(
     
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
+    
+    await get_project_for_user(document.project_id, db, current_user)
     
     return {
         "id": document.id,
@@ -201,8 +211,10 @@ async def get_document_chunks(
     doc_result = await db.execute(
         select(Document).where(Document.id == document_id)
     )
-    if not doc_result.scalar_one_or_none():
+    document = doc_result.scalar_one_or_none()
+    if not document:
         raise HTTPException(status_code=404, detail="Document not found")
+    await get_project_for_user(document.project_id, db, current_user)
     
     # Get chunks
     query = select(DocumentChunk).where(DocumentChunk.document_id == document_id)
@@ -228,6 +240,10 @@ async def semantic_search(
     current_user: User = Depends(get_current_user)
 ):
     """Semantic search using embeddings"""
+    if project_id:
+        await get_project_for_user(project_id, db, current_user)
+    allowed_ids = await accessible_project_ids(db, current_user)
+    
     # Initialize embedding service
     embedding_service = EmbeddingService()
     
@@ -245,6 +261,10 @@ async def semantic_search(
     # Apply filters
     if project_id:
         base_query = base_query.filter(Document.project_id == project_id)
+    
+    # Only search documents from projects the user can access (None = admin, no filter)
+    if allowed_ids is not None:
+        base_query = base_query.filter(Document.project_id.in_(allowed_ids))
     
     if lens_type:
         base_query = base_query.filter(DocumentChunk.lens_type == lens_type)
@@ -301,7 +321,7 @@ async def delete_document(
         raise HTTPException(status_code=404, detail="Document not found")
     
     # Check authorization
-    if current_user.email not in document.project.owners and not current_user.is_admin:
+    if not is_project_member(document.project, current_user):
         raise HTTPException(status_code=403, detail="Not authorized to delete this document")
     
     await db.delete(document)
@@ -327,6 +347,8 @@ async def reclassify_document(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
+    await get_project_for_user(document.project_id, db, current_user)
+    
     # Queue reclassification task
     # TODO: Implement reclassification task
     
@@ -351,7 +373,13 @@ async def get_lens_statistics(
     ).select_from(DocumentChunk).join(Document).group_by(DocumentChunk.lens_type)
     
     if project_id:
+        await get_project_for_user(project_id, db, current_user)
         query = query.filter(Document.project_id == project_id)
+    
+    # Only count documents from projects the user can access (None = admin, no filter)
+    allowed_ids = await accessible_project_ids(db, current_user)
+    if allowed_ids is not None:
+        query = query.filter(Document.project_id.in_(allowed_ids))
     
     result = await db.execute(query)
     

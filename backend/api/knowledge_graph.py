@@ -3,14 +3,16 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, text
+from sqlalchemy import select, func, and_, or_, text
 from pydantic import BaseModel
 import os
 
 from backend.database import get_db
 from backend.models import Project, Document, DocumentChunk
 from backend.api.auth import get_current_user, User
+from backend.api.deps import get_project_for_user
 from backend.services.knowledge_graph.graphiti_client import GraphitiClient
+from backend.services.knowledge_graph.labels import safe_entity_label
 from backend.services.knowledge_graph.local_llm import LocalLLMService
 from backend.workers.ingest_tasks import discover_and_ingest_project
 from backend.workers.entity_extraction_tasks import extract_entities_for_project
@@ -54,14 +56,8 @@ async def get_knowledge_graph_stats(
 ) -> KnowledgeGraphStats:
     """Get knowledge graph statistics for a project"""
     
-    # Verify project exists
-    project_result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = project_result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Verify project access (404 if missing, 403 if not a member)
+    project = await get_project_for_user(project_id, db, current_user)
     
     # Query Neo4j for accurate stats
     try:
@@ -167,14 +163,8 @@ async def extract_entities_for_project_endpoint(
 ):
     """Extract entities from project documents using knowledge graph"""
     
-    # Verify project exists
-    project_result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = project_result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Verify project access (404 if missing, 403 if not a member)
+    project = await get_project_for_user(project_id, db, current_user)
     
     # Check if documents exist
     doc_count_result = await db.execute(
@@ -212,14 +202,8 @@ async def reingest_project_with_entities(
 ):
     """Re-ingest project documents with entity extraction enabled"""
     
-    # Verify project exists
-    project_result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = project_result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Verify project access (404 if missing, 403 if not a member)
+    project = await get_project_for_user(project_id, db, current_user)
     
     # Check if documents exist
     doc_count_result = await db.execute(
@@ -258,14 +242,8 @@ async def search_entities(
 ):
     """Search entities in the knowledge graph for a project"""
     
-    # Verify project exists
-    project_result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = project_result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Verify project access (404 if missing, 403 if not a member)
+    project = await get_project_for_user(project_id, db, current_user)
     
     # Query Neo4j directly for entities
     try:
@@ -292,7 +270,8 @@ async def search_entities(
             # Add entity type filter if provided
             if entity_types:
                 type_list = entity_types.split(",")
-                type_conditions = " OR ".join([f"e:{entity_type.strip()}" for entity_type in type_list])
+                # Cypher labels cannot be parameters, so each one must pass the allowlist
+                type_conditions = " OR ".join([f"e:{safe_entity_label(entity_type)}" for entity_type in type_list])
                 cypher_query += f" AND ({type_conditions})"
             
             cypher_query += """
@@ -394,6 +373,9 @@ async def check_neo4j_integration(
 ):
     """Check Neo4j integration status for a project"""
     
+    # Verify project access before touching Neo4j (403 if not a member)
+    await get_project_for_user(project_id, db, current_user)
+    
     try:
         from neo4j import GraphDatabase
         
@@ -445,14 +427,8 @@ async def refresh_knowledge_graph(
 ):
     """Refresh the knowledge graph by reprocessing all documents"""
     
-    # Verify project exists
-    project_result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = project_result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Verify project access (404 if missing, 403 if not a member)
+    project = await get_project_for_user(project_id, db, current_user)
     
     # Clear existing knowledge graph data for this project
     try:
@@ -495,10 +471,8 @@ async def get_project_graph(
     current_user: User = Depends(get_current_user)
 ):
     """Get knowledge graph for a project"""
-    # Verify project access
-    project = await db.get(Project, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Verify project access (404 if missing, 403 if not a member)
+    project = await get_project_for_user(project_id, db, current_user)
     
     graphiti = GraphitiClient()
     try:
@@ -529,10 +503,8 @@ async def search_knowledge_graph(
     current_user: User = Depends(get_current_user)
 ):
     """Search the knowledge graph"""
-    # Verify project access
-    project = await db.get(Project, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Verify project access (404 if missing, 403 if not a member)
+    project = await get_project_for_user(project_id, db, current_user)
     
     graphiti = GraphitiClient()
     try:
@@ -583,10 +555,8 @@ async def extract_insights(
     current_user: User = Depends(get_current_user)
 ):
     """Extract insights from the knowledge graph using AI"""
-    # Verify project access
-    project = await db.get(Project, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Verify project access (404 if missing, 403 if not a member)
+    project = await get_project_for_user(project_id, db, current_user)
     
     graphiti = GraphitiClient()
     try:
