@@ -3,7 +3,7 @@ services:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: docharvester
     ports:
       - "5432:5432"
@@ -87,15 +87,16 @@ services:
     env_file:
       - env.optimized  # Use optimized configuration
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/docharvester
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/docharvester
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       # Override with optimized settings
-      CURRENT_LLM_PROVIDER: LOCAL
+      LLM_PROVIDER: LOCAL
+      EMBEDDING_PROVIDER: LOCAL
       USE_LOCAL_LLM: true
       OLLAMA_BASE_URL: http://ollama:11434
-      LOCAL_LLM_MODEL: gemma:2b
+      LOCAL_LLM_MODEL: gemma4:e4b
       # Performance optimizations
       WIKI_GENERATION_TIMEOUT: 120
       ENTITY_EXTRACTION_TIMEOUT: 90
@@ -136,15 +137,16 @@ services:
     env_file:
       - env.optimized  # Use optimized configuration
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/docharvester
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/docharvester
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       # Override with optimized settings
-      CURRENT_LLM_PROVIDER: LOCAL
+      LLM_PROVIDER: LOCAL
+      EMBEDDING_PROVIDER: LOCAL
       USE_LOCAL_LLM: true
       OLLAMA_BASE_URL: http://ollama:11434
-      LOCAL_LLM_MODEL: gemma:2b
+      LOCAL_LLM_MODEL: gemma4:e4b
       # Worker optimizations
       WORKER_BATCH_SIZE: 10
       MAX_CONCURRENT_TASKS: 2
@@ -178,7 +180,7 @@ services:
     env_file:
       - env.optimized
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/docharvester
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/docharvester
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2

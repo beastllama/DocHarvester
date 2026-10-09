@@ -57,7 +57,7 @@ def _extract_entities_for_project_sync(project_id: int) -> Dict:
         
         # Initialize LLM service for entity extraction
         llm_service = LocalLLMService()
-        llm_service.default_model = "gemma:2b"
+        llm_service.default_model = settings.local_llm_model
         
         entities_extracted = []
         chunks_processed = 0
@@ -171,7 +171,7 @@ def extract_entities_for_chunk(chunk_id: int) -> Dict:
         
         # Initialize LLM service
         llm_service = LocalLLMService()
-        llm_service.default_model = "gemma:2b"
+        llm_service.default_model = settings.local_llm_model
         
         # Get entity types
         entity_types = _get_entity_types_for_lens(chunk.lens_type)

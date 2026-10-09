@@ -9,6 +9,11 @@ import time
 from pathlib import Path
 
 from backend.config import settings
+from backend.services import runtime_settings
+
+
+class LLMError(RuntimeError):
+    """A local or cloud LLM call failed. Callers must not treat this as content."""
 
 
 class LLMProvider(Enum):
@@ -20,15 +25,15 @@ class LocalLLMService:
     """Service for interacting with local and cloud LLMs"""
     
     # File to persist provider preference
-    PROVIDER_PREFERENCE_FILE = "/tmp/docharvester_llm_provider.txt"
+
     
     # Optimized models for different tasks - using smaller, faster models
     RECOMMENDED_MODELS = {
-        "entity_extraction": "gemma:2b",  # Fast and efficient for structured output
-        "relationship_mapping": "gemma:2b",  # Consistent model for reliability  
-        "summarization": "gemma:2b",  # Good for summarization tasks
-        "general": "gemma:2b",  # Default - reliable and fast
-        "wiki_generation": "gemma:2b"  # For wiki content generation
+        "entity_extraction": "gemma4:e4b",  # Fast and efficient for structured output
+        "relationship_mapping": "gemma4:e4b",  # Consistent model for reliability  
+        "summarization": "gemma4:e4b",  # Good for summarization tasks
+        "general": "gemma4:e4b",  # Default - reliable and fast
+        "wiki_generation": "gemma4:e4b"  # For wiki content generation
     }
     
     # OpenAI models optimized for different tasks
@@ -47,27 +52,15 @@ class LocalLLMService:
         self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
         self.openai_organization_id = os.getenv("OPENAI_ORGANIZATION_ID", None)
         
-        # Check for persisted provider preference first
-        persisted_provider = self._load_provider_preference()
-        provider_setting = persisted_provider or os.getenv("CURRENT_LLM_PROVIDER", "LOCAL").upper()
-        use_local_setting = os.getenv("USE_LOCAL_LLM", "true").lower() == "true"
-        
-        # Determine actual provider based on availability
-        if provider_setting == "OPENAI" and self.openai_api_key:
-            self.current_provider = "OPENAI"
-            self.use_local_llm = False
-        elif provider_setting == "LOCAL" or not self.openai_api_key:
-            self.current_provider = "LOCAL" 
-            self.use_local_llm = True
-        else:
-            # Fallback to local if OpenAI configured but no key
-            self.current_provider = "LOCAL"
-            self.use_local_llm = True
-            
-        self.default_model = os.getenv("LOCAL_LLM_MODEL", "gemma:2b")
+        # Active provider is shared with the workers through the database (env default until switched)
+        self.current_provider = runtime_settings.get_provider(runtime_settings.LLM_KEY)
+        if self.current_provider != "LOCAL" and not self.openai_api_key:
+            print("⚠️ LLM provider is set to OPENAI but OPENAI_API_KEY is empty")
+        self.use_local_llm = self.current_provider == "LOCAL"
+        self.default_model = settings.local_llm_model
         
         print(f"🔧 LocalLLMService initialized:")
-        print(f"   - CURRENT_LLM_PROVIDER: {self.current_provider}")
+        print(f"   - LLM_PROVIDER: {self.current_provider}")
         print(f"   - USE_LOCAL_LLM: {self.use_local_llm}")
         print(f"   - LOCAL_LLM_MODEL: {self.default_model}")
         print(f"   - OpenAI API Key configured: {'Yes' if self.openai_api_key else 'No'}")
@@ -81,26 +74,7 @@ class LocalLLMService:
         self._response_cache = {}
         self._cache_max_size = 100
     
-    def _load_provider_preference(self) -> Optional[str]:
-        """Load persisted provider preference from file"""
-        try:
-            if os.path.exists(self.PROVIDER_PREFERENCE_FILE):
-                with open(self.PROVIDER_PREFERENCE_FILE, 'r') as f:
-                    provider = f.read().strip().upper()
-                    if provider in ["LOCAL", "OPENAI"]:
-                        return provider
-        except Exception as e:
-            print(f"⚠️ Failed to load provider preference: {e}")
-        return None
-    
-    def _save_provider_preference(self, provider: str):
-        """Save provider preference to file"""
-        try:
-            with open(self.PROVIDER_PREFERENCE_FILE, 'w') as f:
-                f.write(provider.upper())
-            print(f"💾 Saved provider preference: {provider}")
-        except Exception as e:
-            print(f"⚠️ Failed to save provider preference: {e}")
+
         
     def _init_client(self):
         """Initialize the HTTP client with optimized settings"""
@@ -169,13 +143,13 @@ class LocalLLMService:
             self.use_local_llm = False
             self.current_provider = "OPENAI"
             # Persist the change to file
-            self._save_provider_preference("OPENAI")
+            runtime_settings.set_provider(runtime_settings.LLM_KEY, "OPENAI")
             print(f"✅ Switched to OpenAI provider")
         else:  # LOCAL
             self.use_local_llm = True
             self.current_provider = "LOCAL"
             # Persist the change to file
-            self._save_provider_preference("LOCAL")
+            runtime_settings.set_provider(runtime_settings.LLM_KEY, "LOCAL")
             print(f"✅ Switched to LOCAL provider (Ollama)")
         
         return True
@@ -547,79 +521,83 @@ Summary:"""
         temperature: float = 0.7,
         max_tokens: int = 2000
     ) -> Any:
-        """Query Ollama API with optimizations"""
+        """Query Ollama. Failures raise LLMError. They are never returned as document text."""
         # Ensure client is initialized
         if self.client is None:
             self._init_client()
-            
+
         # Optimize parameters based on task type for much faster responses
         if task_type in ["entity_extraction", "relationship_mapping"]:
             temperature = 0.1  # More deterministic for structured tasks
-            max_tokens = min(max_tokens, 500)  # Much smaller for speed
+            max_tokens = min(max_tokens, 500)
         elif task_type == "wiki_generation":
-            temperature = 0.3  # Lower temperature for speed
-            max_tokens = min(max_tokens, 800)  # Much smaller for speed
+            temperature = 0.3
+            max_tokens = min(max_tokens, 800)
         else:
-            max_tokens = min(max_tokens, 600)  # General limit for speed
-            
+            max_tokens = min(max_tokens, 600)
+
+        options = {
+            "temperature": temperature,
+            "top_p": 0.7,
+            "num_predict": max_tokens,
+            "num_ctx": 8192,  # Prompts are larger than 1024 tokens
+            "repeat_penalty": 1.2,
+            "top_k": 20,
+        }
+        # Stop tokens only for structured output. For markdown they cut the page short.
+        if json_response:
+            options["stop"] = ["</json>", "```"]
+
         payload = {
             "model": model,
             "prompt": prompt,
             "stream": False,
-            "format": "json" if json_response else None,
-            "options": {
-                "temperature": temperature,
-                "top_p": 0.7,  # Further reduced for speed
-                "num_predict": max_tokens,
-                "stop": ["</json>", "```", "\n\n", "---"],  # More stop tokens
-                "num_ctx": 1024,  # Much smaller context window for speed
-                "num_thread": 8,  # Use all available threads
-                "repeat_penalty": 1.2,  # Stronger penalty to stop faster
-                "top_k": 20  # Limit vocabulary for faster generation
-            }
+            "think": False,  # Gemma 4 and other thinking models otherwise spend the budget on hidden reasoning
+            "options": options,
         }
-        
-        print(f"🔍 Ollama request URL: {self.ollama_url}/api/generate")
-        print(f"🔍 Ollama request model: {model}")
-        
+        if json_response:
+            payload["format"] = "json"
+
+        print(f"🔍 Ollama request: {self.ollama_url}/api/generate model={model}")
         start_time = time.time()
-        
+
         try:
             response = await self.client.post(
                 f"{self.ollama_url}/api/generate",
                 json=payload,
-                timeout=httpx.Timeout(20.0)  # Even shorter timeout for speed
+                # A cold model load can take half a minute on CPU, so the read timeout is generous
+                timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=30.0),
             )
             response.raise_for_status()
-            
-            result = response.json()
-            generated_text = result.get("response", "")
-            
-            elapsed_time = time.time() - start_time
-            print(f"⏱️ Ollama response time: {elapsed_time:.2f}s")
-            
-            if json_response:
+        except httpx.TimeoutException as exc:
+            raise LLMError(f"Ollama timed out while generating with {model}") from exc
+        except httpx.HTTPError as exc:
+            raise LLMError(f"Ollama request failed for {model}: {exc}") from exc
+
+        result = response.json()
+        generated_text = (result.get("response") or "").strip()
+        print(f"⏱️ Ollama response time: {time.time() - start_time:.2f}s")
+
+        if not generated_text:
+            raise LLMError(
+                f"{model} returned an empty response (done_reason={result.get('done_reason')}). "
+                f"Try a larger max_tokens or check the model."
+            )
+
+        if not json_response:
+            return generated_text
+
+        try:
+            return json.loads(generated_text)
+        except json.JSONDecodeError:
+            import re
+            json_match = re.search(r'\{.*\}|\[.*\]', generated_text, re.DOTALL)
+            if json_match:
                 try:
-                    return json.loads(generated_text)
+                    return json.loads(json_match.group())
                 except json.JSONDecodeError:
-                    # Try to extract JSON from the response
-                    import re
-                    json_match = re.search(r'\{.*\}|\[.*\]', generated_text, re.DOTALL)
-                    if json_match:
-                        try:
-                            return json.loads(json_match.group())
-                        except:
-                            pass
-                    return {"error": "Failed to parse JSON response", "raw": generated_text}
-            else:
-                return generated_text.strip()
-                
-        except httpx.TimeoutException:
-            print(f"⏰ Ollama request timed out after 90 seconds")
-            return {"error": "Request timed out"} if json_response else "Error: Request timed out"
-        except Exception as e:
-            print(f"❌ Ollama query error: {e}")
-            return {"error": str(e)} if json_response else f"Error: {e}"
+                    pass
+            return {"error": "Failed to parse JSON response", "raw": generated_text}
 
     async def _query_openai(
         self,

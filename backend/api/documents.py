@@ -10,7 +10,8 @@ from backend.database import get_db
 from backend.models import Document, DocumentChunk, Project, User
 from backend.api.auth import get_current_user
 from backend.api.deps import accessible_project_ids, get_project_for_user, is_project_member
-from backend.services.embeddings import EmbeddingService
+from backend.services.embeddings import EmbeddingError, EmbeddingService
+from starlette.concurrency import run_in_threadpool
 
 
 router = APIRouter()
@@ -245,10 +246,13 @@ async def semantic_search(
     allowed_ids = await accessible_project_ids(db, current_user)
     
     # Initialize embedding service
-    embedding_service = EmbeddingService()
+    try:
+        embedding_service = await run_in_threadpool(EmbeddingService)
+        query_embedding = await run_in_threadpool(embedding_service.get_embedding, query)
+    except EmbeddingError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     
     # Generate query embedding
-    query_embedding = await embedding_service.generate_embedding(query)
     
     # Build vector similarity search
     # Using pgvector's <-> operator for cosine distance
@@ -270,7 +274,8 @@ async def semantic_search(
         base_query = base_query.filter(DocumentChunk.lens_type == lens_type)
     
     # Order by similarity and limit
-    base_query = base_query.order_by('similarity').limit(limit)
+    # Smallest cosine distance first, so the most similar chunks come first
+    base_query = base_query.order_by(DocumentChunk.embedding.cosine_distance(query_embedding)).limit(limit)
     
     result = await db.execute(base_query)
     

@@ -65,6 +65,8 @@ def _discover_and_ingest_project_sync(project_id: int) -> Dict:
         )
         classifier = LensClassifier()
         embedding_service = EmbeddingService()
+        # Fail the whole run before creating any document if the embedder cannot work
+        embedding_service.check_ready()
         
         # Get connectors from project
         connectors = _get_project_connectors(project)
@@ -102,10 +104,17 @@ def _discover_and_ingest_project_sync(project_id: int) -> Dict:
                 # Process each document
                 for result in search_results:
                     print(f"⚙️  Processing: {result.title}")
+                    # One savepoint per document: a failure rolls back only that document
+                    savepoint = db.begin_nested()
                     doc_result = _process_document_sync(
                         db, project, result,
                         text_processor, classifier, embedding_service
                     )
+                    if doc_result.get("success"):
+                        savepoint.commit()
+                    else:
+                        savepoint.rollback()
+                        _record_ingest_error(db, project.id, result, doc_result.get("error", "Unknown error"))
                     all_results.append(doc_result)
                     if doc_result.get("success"):
                         print(f"✅ Successfully processed: {result.title} ({doc_result.get('chunks_created', 0)} chunks)")
@@ -153,6 +162,28 @@ def _discover_and_ingest_project_sync(project_id: int) -> Dict:
         db.close()
 
 
+def _record_ingest_error(db, project_id: int, result, message: str) -> None:
+    """Keep a visible record of a document that failed. It has no chunks."""
+    existing = db.query(Document).filter(Document.doc_id == result.doc_id).first()
+    if existing is not None and existing.project_id != project_id:
+        print(f"⚠️ doc_id {result.doc_id} belongs to another project; error not recorded here")
+        return
+    if existing is None:
+        existing = Document(
+            project_id=project_id,
+            doc_id=result.doc_id,
+            title=result.title or result.doc_id,
+            source_type=result.source_type,
+            source_url=result.source_url,
+            file_type=result.file_type,
+            source_meta={},
+        )
+        db.add(existing)
+    meta = dict(existing.source_meta or {})
+    meta.update({"ingest_status": "error", "ingest_error": message})
+    existing.source_meta = meta
+
+
 def _process_document_sync(
     db, project: Project, search_result: SearchResult,
     text_processor: TextProcessor, classifier: LensClassifier,
@@ -198,7 +229,7 @@ def _process_document_sync(
         
         # Initialize knowledge graph service for entity extraction
         llm_service = LocalLLMService()
-        llm_service.default_model = "gemma:2b"
+        llm_service.default_model = settings.local_llm_model
         entities_extracted = []
         
         # Process each chunk

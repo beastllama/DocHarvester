@@ -5,6 +5,7 @@ from .lens import Lens, LensType
 from .coverage import CoverageRequirement, CoverageStatus
 from .user import User
 from .wiki import WikiPage, WikiStructure
+from .platform_setting import PlatformSetting
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Float, JSON, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -21,7 +22,8 @@ __all__ = [
     "CoverageStatus",
     "User",
     "WikiPage",
-    "WikiStructure"
+    "WikiStructure",
+    "PlatformSetting",
 ]
 
 class ProcessingTask(Base):

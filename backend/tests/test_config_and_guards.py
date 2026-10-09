@@ -42,8 +42,8 @@ def test_label_guard_allows_only_known_labels(raw, expected):
     assert safe_entity_label(raw) == expected
 
 
-def test_embedding_without_provider_raises_and_never_returns_vectors():
-    service = EmbeddingService()
-    assert service.client is None
+def test_embedding_never_returns_vectors_when_ollama_is_down(monkeypatch):
+    from backend.config import settings
+    monkeypatch.setattr(settings, "ollama_base_url", "http://127.0.0.1:9")
     with pytest.raises(EmbeddingError):
-        service.get_embedding("some text")
+        EmbeddingService(provider="LOCAL").get_embedding("some text")

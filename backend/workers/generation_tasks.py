@@ -211,23 +211,13 @@ async def _generate_document_for_topic(
             for chunk in existing_chunks[:5]
         ])
         
-        # Generate content using OpenAI
         prompt = _build_generation_prompt(lens_type, topic, project.name, context)
-        
-        # Initialize OpenAI client
-        openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
-        
-        response = await openai_client.chat.completions.create(
-            model=settings.llm_model,
-            messages=[
-                {"role": "system", "content": _get_system_prompt(lens_type)},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=2000
-        )
-        
-        content = response.choices[0].message.content
+
+        # Provider-aware: local (Ollama) or the configured cloud provider
+        from backend.services.knowledge_graph.local_llm import LocalLLMService
+        llm = LocalLLMService()
+        full_prompt = f"{_get_system_prompt(lens_type)}\n\n{prompt}"
+        content = await llm.query_llm(prompt=full_prompt, temperature=0.7, max_tokens=2000, task_type="general")
         
         # Create document
         doc = Document(
@@ -254,7 +244,7 @@ async def _generate_document_for_topic(
         
         for idx, chunk in enumerate(text_chunks):
             # Generate embedding
-            embedding = await embedding_service.generate_embedding(chunk.text)
+            embedding = await asyncio.to_thread(embedding_service.get_embedding, chunk.text)
             
             document_chunk = DocumentChunk(
                 document_id=doc.id,
@@ -269,7 +259,8 @@ async def _generate_document_for_topic(
                 tokens=chunk.tokens,
                 chunk_metadata={
                     "topic": topic,
-                    "generation_model": settings.llm_model
+                    "generation_provider": llm.current_provider,
+                    "generation_model": settings.local_llm_model if llm.current_provider == "LOCAL" else settings.llm_model
                 }
             )
             

@@ -10,6 +10,7 @@ from backend.database import get_db
 from backend.models import User, Project, Document
 from backend.api.auth import get_current_user, get_password_hash
 from backend.config import settings
+from backend.services import runtime_settings
 from backend.services.knowledge_graph.local_llm import LocalLLMService
 
 router = APIRouter()
@@ -333,7 +334,7 @@ async def get_settings(
         llm_temperature=settings.llm_temperature,
         llm_max_tokens=settings.llm_max_tokens,
         use_local_llm=settings.use_local_llm,
-        current_llm_provider=settings.current_llm_provider,
+        current_llm_provider=runtime_settings.get_provider(runtime_settings.LLM_KEY),
         openai_api_key_configured=bool(settings.openai_api_key),
         openai_organization_id=settings.openai_organization_id,
         local_llm_model=settings.local_llm_model,
@@ -367,7 +368,6 @@ async def update_settings(
             "llm_temperature": "LLM_TEMPERATURE",
             "llm_max_tokens": "LLM_MAX_TOKENS",
             "use_local_llm": "USE_LOCAL_LLM",
-            "current_llm_provider": "CURRENT_LLM_PROVIDER",
             "local_llm_model": "LOCAL_LLM_MODEL",
             "openai_organization_id": "OPENAI_ORGANIZATION_ID"
         }

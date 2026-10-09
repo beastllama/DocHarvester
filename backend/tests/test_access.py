@@ -162,3 +162,15 @@ def test_admin_can_delete_user_and_not_self(client, world):
     assert client.delete(f"/api/v1/admin/users/{bob['id']}", headers=world["adm"]).status_code == 200
     me = client.get("/api/v1/auth/me", headers=world["adm"]).json()
     assert client.delete(f"/api/v1/admin/users/{me['id']}", headers=world["adm"]).status_code == 400
+
+
+def test_create_project_cannot_hand_over_ownership_or_connectors(client, world):
+    """Non-admins always own what they create and cannot set connector config."""
+    r = client.post("/api/v1/projects/", headers=world["alice"],
+                    json={"name": "create-check", "owners": ["attacker@x.test"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["owners"] == [A_EMAIL]
+
+    r = client.post("/api/v1/projects/", headers=world["alice"],
+                    json={"name": "create-check-2", "connector_configs": {"custom": {"api_key": "x"}}})
+    assert r.status_code == 403

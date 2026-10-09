@@ -32,6 +32,9 @@ os.environ.setdefault("NEO4J_URI", "bolt://localhost:7687")
 os.environ.setdefault("NEO4J_USER", "neo4j")
 os.environ.setdefault("NEO4J_PASSWORD", os.getenv("TEST_NEO4J_PASSWORD", "docharvester-test"))
 
+# Local-mode tests need Ollama with nomic-embed-text installed
+os.environ.setdefault("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+
 
 @pytest.fixture(scope="session")
 def client():
