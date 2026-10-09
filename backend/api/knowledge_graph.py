@@ -1,18 +1,17 @@
 """Knowledge Graph API endpoints"""
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, text
 from pydantic import BaseModel
-import os
 
 from backend.database import get_db
-from backend.models import Project, Document, DocumentChunk
+from backend.models import Document, DocumentChunk
 from backend.api.auth import get_current_user, User
 from backend.api.deps import get_project_for_user
-from backend.services.knowledge_graph.graphiti_client import GraphitiClient
-from backend.services.knowledge_graph.labels import safe_entity_label
+from starlette.concurrency import run_in_threadpool
+from backend.services.knowledge_graph import neo4j_store
 from backend.services.knowledge_graph.local_llm import LocalLLMService
 from backend.workers.ingest_tasks import discover_and_ingest_project
 from backend.workers.entity_extraction_tasks import extract_entities_for_project
@@ -45,7 +44,7 @@ class EntitySearchRequest(BaseModel):
     limit: int = 50
 
 
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "neo4j_default_password")
+
 
 
 @router.get("/projects/{project_id}/stats")
@@ -59,66 +58,14 @@ async def get_knowledge_graph_stats(
     # Verify project access (404 if missing, 403 if not a member)
     project = await get_project_for_user(project_id, db, current_user)
     
-    # Query Neo4j for accurate stats
+    # Query Neo4j, scoped to this project
     try:
-        from neo4j import GraphDatabase
-        
-        NEO4J_URI = "bolt://neo4j:7687"
-        NEO4J_USER = "neo4j"
-        
-        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-        
-        with driver.session() as session:
-            # Count entities for this project
-            entity_result = session.run("""
-            MATCH (d:Document {project: $project_name})-[:MENTIONS]->(e)
-            RETURN count(DISTINCT e) as entity_count
-            """, {"project_name": project.name})
-            
-            total_entities = entity_result.single()["entity_count"]
-            
-            # Count relationships for this project
-            rel_result = session.run("""
-            MATCH (d:Document {project: $project_name})-[r:MENTIONS]->(e)
-            RETURN count(r) as rel_count
-            """, {"project_name": project.name})
-            
-            total_relationships = rel_result.single()["rel_count"]
-            
-            # Get entities by type for this project
-            type_result = session.run("""
-            MATCH (d:Document {project: $project_name})-[:MENTIONS]->(e)
-            UNWIND labels(e) as label
-            RETURN label, count(DISTINCT e) as count
-            ORDER BY count DESC
-            """, {"project_name": project.name})
-            
-            entities_by_type = {}
-            for record in type_result:
-                entities_by_type[record["label"]] = record["count"]
-            
-            # Get last update time
-            last_updated_result = session.run("""
-            MATCH (d:Document {project: $project_name})
-            RETURN max(d.created_at) as last_updated
-            """, {"project_name": project.name})
-            
-            last_updated_str = last_updated_result.single()["last_updated"]
-            last_updated = None
-            if last_updated_str:
-                try:
-                    from datetime import datetime
-                    last_updated = datetime.fromisoformat(last_updated_str.replace('Z', '+00:00'))
-                except:
-                    pass
-        
-        driver.close()
-        
+        stats = await run_in_threadpool(neo4j_store.project_stats, project_id)
         return KnowledgeGraphStats(
-            total_entities=total_entities,
-            total_relationships=total_relationships,
-            entities_by_type=entities_by_type,
-            last_updated=last_updated
+            total_entities=stats["total_entities"],
+            total_relationships=stats["total_relationships"],
+            entities_by_type=stats["entities_by_type"],
+            last_updated=stats["last_updated"]
         )
         
     except Exception as e:
@@ -245,62 +192,11 @@ async def search_entities(
     # Verify project access (404 if missing, 403 if not a member)
     project = await get_project_for_user(project_id, db, current_user)
     
-    # Query Neo4j directly for entities
+    # Query Neo4j, scoped to this project
     try:
-        from neo4j import GraphDatabase
-        
-        NEO4J_URI = "bolt://neo4j:7687"
-        NEO4J_USER = "neo4j"
-        
-        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-        
-        with driver.session() as session:
-            # Build Cypher query based on parameters
-            cypher_query = """
-            MATCH (d:Document {project: $project_name})-[:MENTIONS]->(e)
-            WHERE 1=1
-            """
-            params = {"project_name": project.name}
-            
-            # Add query filter if provided
-            if query:
-                cypher_query += " AND (e.name CONTAINS $query OR ANY(prop IN keys(e) WHERE toString(e[prop]) CONTAINS $query))"
-                params["query"] = query
-            
-            # Add entity type filter if provided
-            if entity_types:
-                type_list = entity_types.split(",")
-                # Cypher labels cannot be parameters, so each one must pass the allowlist
-                type_conditions = " OR ".join([f"e:{safe_entity_label(entity_type)}" for entity_type in type_list])
-                cypher_query += f" AND ({type_conditions})"
-            
-            cypher_query += """
-            RETURN e.name as name, 
-                   labels(e) as types, 
-                   properties(e) as properties,
-                   d.title as source_document,
-                   count(DISTINCT d) as document_count
-            ORDER BY document_count DESC, e.name
-            LIMIT $limit
-            """
-            params["limit"] = limit
-            
-            result = session.run(cypher_query, params)
-            
-            entities = []
-            for record in result:
-                entities.append({
-                    "name": record["name"],
-                    "type": record["types"][0] if record["types"] else "Entity",
-                    "types": record["types"],
-                    "properties": dict(record["properties"]) if record["properties"] else {},
-                    "document_count": record["document_count"],
-                    "confidence": 1.0,  # From Neo4j, so high confidence
-                    "source": "knowledge_graph"
-                })
-        
-        driver.close()
-        
+        entities = await run_in_threadpool(
+            neo4j_store.search_entities, project_id, query, entity_types, limit
+        )
         return {
             "entities": entities,
             "total_found": len(entities),
@@ -377,39 +273,14 @@ async def check_neo4j_integration(
     await get_project_for_user(project_id, db, current_user)
     
     try:
-        from neo4j import GraphDatabase
-        
-        NEO4J_URI = "bolt://neo4j:7687"
-        NEO4J_USER = "neo4j"
-        
-        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-        
-        with driver.session() as session:
-            # Count nodes for this project
-            result = session.run(
-                "MATCH (d:Document {project: $project_name}) RETURN count(d) as doc_count",
-                project_name=f"project_{project_id}"
-            )
-            doc_count = result.single()["doc_count"]
-            
-            # Count all entities
-            entity_result = session.run("MATCH (n) WHERE NOT n:Document RETURN count(n) as entity_count")
-            entity_count = entity_result.single()["entity_count"]
-            
-            # Count relationships
-            rel_result = session.run("MATCH ()-[r]->() RETURN count(r) as rel_count")
-            rel_count = rel_result.single()["rel_count"]
-        
-        driver.close()
-        
+        status = await run_in_threadpool(neo4j_store.project_status, project_id)
         return {
             "neo4j_connected": True,
-            "project_documents": doc_count,
-            "total_entities": entity_count,
-            "total_relationships": rel_count,
+            "project_documents": status["project_documents"],
+            "total_entities": status["total_entities"],
+            "total_relationships": status["total_relationships"],
             "status": "operational"
         }
-        
     except Exception as e:
         return {
             "neo4j_connected": False,
@@ -432,22 +303,7 @@ async def refresh_knowledge_graph(
     
     # Clear existing knowledge graph data for this project
     try:
-        from neo4j import GraphDatabase
-        
-        NEO4J_URI = "bolt://neo4j:7687"
-        NEO4J_USER = "neo4j"
-        
-        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-        
-        with driver.session() as session:
-            # Delete project documents and their relationships
-            session.run(
-                "MATCH (d:Document {project: $project_name}) DETACH DELETE d",
-                project_name=f"project_{project_id}"
-            )
-        
-        driver.close()
-        
+        await run_in_threadpool(neo4j_store.delete_project_graph, project_id)
     except Exception as e:
         print(f"Warning: Could not clear Neo4j data: {e}")
     
@@ -465,114 +321,61 @@ async def refresh_knowledge_graph(
 @router.get("/projects/{project_id}/graph")
 async def get_project_graph(
     project_id: int,
-    entity_types: Optional[List[str]] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get knowledge graph for a project"""
+    """Documents and entities for a project, as graph nodes and edges"""
     # Verify project access (404 if missing, 403 if not a member)
-    project = await get_project_for_user(project_id, db, current_user)
-    
-    graphiti = GraphitiClient()
-    try:
-        # Get temporal graph
-        graph_data = await graphiti.get_temporal_graph(
-            project_name=project.name,
-            entity_types=entity_types
-        )
-        
-        return {
-            "project_id": project_id,
-            "graph": graph_data,
-            "entity_count": len(graph_data.get("nodes", [])),
-            "relationship_count": len(graph_data.get("edges", []))
-        }
-    finally:
-        await graphiti.close()
+    await get_project_for_user(project_id, db, current_user)
+
+    graph = await run_in_threadpool(neo4j_store.project_graph, project_id, limit)
+    return {
+        "project_id": project_id,
+        "graph": graph,
+        "entity_count": sum(1 for node in graph["nodes"] if node["kind"] == "entity"),
+        "relationship_count": len(graph["edges"]),
+    }
 
 
 @router.post("/projects/{project_id}/graph/search")
 async def search_knowledge_graph(
     project_id: int,
     query: str,
-    search_type: str = Query("hybrid", regex="^(hybrid|semantic|keyword|graph)$"),
-    lens_types: Optional[List[str]] = Query(None),
     limit: int = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Search the knowledge graph"""
+    """Keyword search over entity names and properties, within one project"""
     # Verify project access (404 if missing, 403 if not a member)
-    project = await get_project_for_user(project_id, db, current_user)
-    
-    graphiti = GraphitiClient()
-    try:
-        results = await graphiti.search(
-            query=query,
-            project_name=project.name,
-            lens_types=lens_types,
-            search_type=search_type,
-            limit=limit
-        )
-        
-        return {
-            "query": query,
-            "search_type": search_type,
-            "results": results
-        }
-    finally:
-        await graphiti.close()
+    await get_project_for_user(project_id, db, current_user)
+
+    results = await run_in_threadpool(neo4j_store.search_entities, project_id, query, None, limit)
+    return {
+        "query": query,
+        "search_type": "keyword",
+        "results": results
+    }
 
 
-@router.get("/entities/{entity_name}/relationships")
-async def get_entity_relationships(
-    entity_name: str,
-    depth: int = Query(2, ge=1, le=5),
-    relationship_types: Optional[List[str]] = Query(None),
-    current_user: User = Depends(get_current_user)
-):
-    """Get relationships for a specific entity"""
-    graphiti = GraphitiClient()
-    try:
-        relationships = await graphiti.get_entity_relationships(
-            entity_name=entity_name,
-            relationship_types=relationship_types,
-            depth=depth
-        )
-        
-        return relationships
-    finally:
-        await graphiti.close()
-
-
-@router.post("/projects/{project_id}/insights")
-async def extract_insights(
+@router.get("/projects/{project_id}/entities/{entity_name}/related")
+async def get_related_entities(
     project_id: int,
-    insight_type: str = Query("summary", regex="^(summary|trends|anomalies|recommendations)$"),
-    context: Optional[Dict[str, Any]] = None,
+    entity_name: str,
+    limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Extract insights from the knowledge graph using AI"""
+    """Entities that share documents with the named entity, within one project"""
     # Verify project access (404 if missing, 403 if not a member)
-    project = await get_project_for_user(project_id, db, current_user)
-    
-    graphiti = GraphitiClient()
-    try:
-        insights = await graphiti.extract_insights(
-            project_name=project.name,
-            insight_type=insight_type,
-            context=context
-        )
-        
-        return {
-            "project_id": project_id,
-            "insight_type": insight_type,
-            "insights": insights
-        }
-    finally:
-        await graphiti.close()
+    await get_project_for_user(project_id, db, current_user)
+
+    related = await run_in_threadpool(neo4j_store.related_entities, project_id, entity_name, limit)
+    return {
+        "project_id": project_id,
+        "entity": entity_name,
+        "related": related
+    }
 
 
 @router.post("/entities/extract")
@@ -586,10 +389,10 @@ async def extract_entities_from_text(
     try:
         # Get entity types
         if request.use_logistics_entities:
-            from backend.services.knowledge_graph.graphiti_client import LOGISTICS_ENTITIES
+            from backend.services.knowledge_graph.labels import LOGISTICS_ENTITIES
             entity_types = LOGISTICS_ENTITIES
         else:
-            # Use the function from ingest_tasks since graphiti might not have this method
+            # Entity templates live in labels.py
             from backend.workers.ingest_tasks import _get_entity_types_for_lens
             entity_types = _get_entity_types_for_lens(request.lens_type or "GENERAL")
         

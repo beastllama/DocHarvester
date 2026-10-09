@@ -139,7 +139,6 @@ class Settings(BaseSettings):
     
     # Knowledge Graph settings
     enable_knowledge_graph: bool = os.getenv("ENABLE_KNOWLEDGE_GRAPH", "true").lower() == "true"
-    graphiti_url: str = os.getenv("GRAPHITI_URL", "http://graphiti:8000")
     neo4j_uri: str = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
     neo4j_user: str = os.getenv("NEO4J_USER", "neo4j")
     neo4j_password: str = os.getenv("NEO4J_PASSWORD", "docharvester123")

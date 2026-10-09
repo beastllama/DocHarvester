@@ -1,10 +1,10 @@
 """Knowledge Graph Services for DocHarvester"""
-from .graphiti_client import GraphitiClient, LOGISTICS_ENTITIES
+from .labels import LOGISTICS_ENTITIES, safe_entity_label
 from .local_llm import LocalLLMService, LLMProvider
 
 __all__ = [
-    "GraphitiClient",
-    "LocalLLMService", 
+    "LocalLLMService",
     "LLMProvider",
-    "LOGISTICS_ENTITIES"
-] 
+    "LOGISTICS_ENTITIES",
+    "safe_entity_label",
+]

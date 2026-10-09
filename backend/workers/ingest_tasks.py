@@ -16,7 +16,7 @@ from backend.connectors.base import SearchResult
 from backend.services.text_processor import TextProcessor
 from backend.services.classifier import LensClassifier
 from backend.services.embeddings import EmbeddingService
-from backend.services.knowledge_graph.graphiti_client import GraphitiClient, LOGISTICS_ENTITIES
+from backend.services.knowledge_graph.labels import LOGISTICS_ENTITIES
 from backend.services.knowledge_graph.local_llm import LocalLLMService
 from backend.services.knowledge_graph.labels import safe_entity_label
 
@@ -290,19 +290,7 @@ def _process_document_sync(
         # Store extracted entities in Neo4j if available
         if entities_extracted:
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(
-                            asyncio.run, 
-                            _store_entities_in_neo4j(doc, entities_extracted, project.name)
-                        )
-                        future.result(timeout=10)
-                else:
-                    loop.run_until_complete(
-                        _store_entities_in_neo4j(doc, entities_extracted, project.name)
-                    )
+                _store_entities_in_neo4j(doc, entities_extracted, project.id)
                 print(f"✅ Stored {len(entities_extracted)} entities in knowledge graph")
             except Exception as e:
                 print(f"Warning: Failed to store entities in Neo4j: {e}")
@@ -494,62 +482,13 @@ def _get_entity_types_for_lens(lens_type: str) -> List[Dict]:
     return base_entities + specific_entities
 
 
-async def _store_entities_in_neo4j(doc: Document, entities: List[Dict], project_name: str):
-    """Store extracted entities in Neo4j knowledge graph"""
-    from neo4j import GraphDatabase
-    
-    NEO4J_URI = "bolt://neo4j:7687"
-    NEO4J_USER = "neo4j"
-    
-    try:
-        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-        
-        with driver.session() as session:
-            # Create document node
-            session.run("""
-            MERGE (d:Document {id: $doc_id})
-            SET d.title = $title, 
-                d.type = $doc_type, 
-                d.source = $source,
-                d.project = $project,
-                d.created_at = $created_at
-            """, {
-                "doc_id": doc.doc_id,
-                "title": doc.title,
-                "doc_type": doc.file_type,
-                "source": doc.source_type,
-                "project": project_name,
-                "created_at": doc.created_at.isoformat() if doc.created_at else None
-            })
-            
-            # Create entities and relationships
-            for entity in entities:
-                entity_type = safe_entity_label(entity.get("type", "Entity"))
-                entity_name = entity.get("name", "Unknown")
-                entity_props = entity.get("properties", {})
-                
-                # Create entity node
-                session.run(f"""
-                MERGE (e:{entity_type} {{name: $name}})
-                SET e += $props
-                """, {
-                    "name": entity_name,
-                    "props": entity_props
-                })
-                
-                # Create relationship from document to entity
-                session.run(f"""
-                MATCH (d:Document {{id: $doc_id}})
-                MATCH (e:{entity_type} {{name: $entity_name}})
-                MERGE (d)-[:MENTIONS]->(e)
-                """, {
-                    "doc_id": doc.doc_id,
-                    "entity_name": entity_name
-                })
-        
-        driver.close()
-        
-    except Exception as e:
-        print(f"Error storing entities in Neo4j: {e}")
-        # Don't fail the whole process if Neo4j is unavailable
-        pass 
+def _store_entities_in_neo4j(doc: Document, entities: List[Dict], project_id: int) -> None:
+    """Store one document's entities in the knowledge graph, scoped to its project"""
+    from backend.services.knowledge_graph import neo4j_store
+    neo4j_store.write_document_entities(
+        doc_id=doc.doc_id,
+        title=doc.title or "",
+        source_type=doc.source_type or "",
+        project_id=project_id,
+        entities=entities,
+    )

@@ -121,14 +121,7 @@ def _extract_entities_for_project_sync(project_id: int) -> Dict:
                 for doc_id, entities in doc_entities.items():
                     doc = db.query(Document).filter(Document.id == doc_id).first()
                     if doc and entities:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        try:
-                            loop.run_until_complete(
-                                _store_entities_in_neo4j(doc, entities, project.name)
-                            )
-                        finally:
-                            loop.close()
+                        _store_entities_in_neo4j(doc, entities, project.id)
                 
                 print(f"✅ Stored {len(entities_extracted)} entities in knowledge graph")
             except Exception as e:
