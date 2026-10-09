@@ -120,12 +120,20 @@ async def create_project(
     if existing:
         raise HTTPException(status_code=400, detail="Project already exists")
     
+    # Only admins choose owners or connector config. Everyone else owns what they create.
+    if current_user.is_admin:
+        owners = project.owners or [current_user.email]
+    else:
+        if project.connector_configs:
+            raise HTTPException(status_code=403, detail="Only admins can set connector configuration")
+        owners = [current_user.email]
+
     # Create new project
     db_project = Project(
         name=project.name,
         description=project.description,
         tags=project.tags,
-        owners=project.owners if project.owners else [current_user.email],
+        owners=owners,
         connector_configs=project.connector_configs or {}
     )
     

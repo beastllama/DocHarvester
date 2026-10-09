@@ -65,6 +65,7 @@ docker-compose logs -f
 # Security (IMPORTANT: Change these!)
 SECRET_KEY=your_secure_secret_key_here
 NEO4J_PASSWORD=your_secure_neo4j_password_here
+POSTGRES_PASSWORD=your_secure_postgres_password_here
 
 # OpenAI (Optional - for advanced features)
 OPENAI_API_KEY=your_actual_openai_api_key_here
@@ -164,6 +165,30 @@ cd frontend && npm run build
 2. **Entity Extraction** → Knowledge graph construction
 3. **Embedding Generation** → Vector storage
 4. **Wiki Generation** → AI-powered documentation
+
+## 🖥️ Local-only mode
+
+Runs fully on your machine. No API keys, and no document text leaves the network.
+
+```bash
+docker compose up -d ollama
+docker compose exec ollama ollama pull gemma4:e4b        # chat model (use gemma4:e2b on less memory)
+docker compose exec ollama ollama pull nomic-embed-text  # embedding model
+```
+
+Both providers default to `LOCAL`:
+
+```env
+LLM_PROVIDER=LOCAL
+EMBEDDING_PROVIDER=LOCAL
+LOCAL_LLM_MODEL=gemma4:e4b
+LOCAL_EMBEDDING_MODEL=nomic-embed-text
+EMBEDDING_DIMENSION=768
+```
+
+- Ingestion refuses to start if the embedding model is missing, and the error names the `ollama pull` command to run.
+- Changing the embedding model or the dimension means re-embedding: `python backend/scripts/reembed.py`.
+- Provider switches made in the admin screen are stored in the database, so the workers follow them.
 
 ## 🔒 Security
 

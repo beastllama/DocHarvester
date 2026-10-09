@@ -44,6 +44,14 @@ async def init_db():
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         # Create all tables
         await conn.run_sync(Base.metadata.create_all)
+        # create_all never resizes a column. Warn loudly if the size no longer matches.
+        size = (await conn.execute(text(
+            "SELECT atttypmod FROM pg_attribute "
+            "WHERE attrelid = 'document_chunks'::regclass AND attname = 'embedding'"
+        ))).scalar()
+        if size is not None and size != settings.embedding_dimension:
+            print(f"⚠️ document_chunks.embedding is {size} dimensions but EMBEDDING_DIMENSION is "
+                  f"{settings.embedding_dimension}. Run: python backend/scripts/reembed.py")
 
         # Initialize default lens types using the same connection
         from backend.models.lens import Lens, LensType

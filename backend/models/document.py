@@ -1,6 +1,8 @@
 from sqlalchemy import Column, String, Text, Float, Integer, ForeignKey, JSON, Boolean, DateTime
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
+
+from backend.config import settings
 from .base import Base, TimestampMixin
 
 
@@ -28,7 +30,7 @@ class DocumentChunk(Base, TimestampMixin):
     document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
     chunk_index = Column(Integer, nullable=False)
     text = Column(Text, nullable=False)
-    embedding = Column(Vector(1536))  # Adjust dimension based on model
+    embedding = Column(Vector(settings.embedding_dimension))
     
     # Classification
     lens_type = Column(String(10), nullable=False)

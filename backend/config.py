@@ -51,15 +51,11 @@ class Settings(BaseSettings):
     ]
     
     # Available local models for selection
+    # Local models verified on the Ollama registry. Pull with: ollama pull <name>
     available_local_models: List[str] = [
-        "gemma:2b",    # Memory efficient
-        "gemma:7b",    # Balanced performance
-        "llama3:8b",   # High quality
-        "mistral:7b",  # Good reasoning
-        "qwen2:0.5b",  # Ultra lightweight
-        "qwen2:1.5b",  # Lightweight
-        "phi3:mini",   # Microsoft's efficient model
-        "phi3:medium"  # Microsoft's medium model
+        "gemma4:e2b",  # Gemma 4, smallest. Low memory
+        "gemma4:e4b",  # Gemma 4, balanced. Default
+        "hermes3:8b",  # Nous Research Hermes 3. Strong tool use and instruction following
     ]
     
     # Model cost and performance tiers for recommendations
@@ -101,8 +97,13 @@ class Settings(BaseSettings):
     }
     
     # Embedding settings
-    embedding_model: str = "text-embedding-3-small"
-    embedding_dimension: int = 1536
+    # Embeddings. LOCAL uses Ollama. OPENAI and AZURE_OPENAI use the cloud models below.
+    embedding_provider: Literal["LOCAL", "OPENAI", "AZURE_OPENAI"] = "LOCAL"
+    embedding_model: str = "text-embedding-3-small"  # OpenAI and Azure model
+    local_embedding_model: str = os.getenv("LOCAL_EMBEDDING_MODEL", "nomic-embed-text")
+    # One size for every provider. The database column is built from it.
+    # Changing it, or changing the embedding model, means re-embedding: scripts/reembed.py
+    embedding_dimension: int = 768
     
     # Chunk settings
     chunk_size: int = 1500
@@ -146,10 +147,9 @@ class Settings(BaseSettings):
     # Local LLM settings
     use_local_llm: bool = os.getenv("USE_LOCAL_LLM", "true").lower() == "true"
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
-    local_llm_model: str = os.getenv("LOCAL_LLM_MODEL", "gemma:2b")
+    local_llm_model: str = os.getenv("LOCAL_LLM_MODEL", "gemma4:e4b")
     
     # Dynamic LLM switching (persisted setting)
-    current_llm_provider: str = os.getenv("CURRENT_LLM_PROVIDER", "LOCAL")  # LOCAL or OPENAI
     
     # Entity extraction settings
     entity_extraction_enabled: bool = os.getenv("ENTITY_EXTRACTION_ENABLED", "true").lower() == "true"
