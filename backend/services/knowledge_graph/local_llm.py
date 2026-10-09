@@ -24,18 +24,6 @@ class LLMProvider(Enum):
 class LocalLLMService:
     """Service for interacting with local and cloud LLMs"""
     
-    # File to persist provider preference
-
-    
-    # Optimized models for different tasks - using smaller, faster models
-    RECOMMENDED_MODELS = {
-        "entity_extraction": "gemma4:e4b",  # Fast and efficient for structured output
-        "relationship_mapping": "gemma4:e4b",  # Consistent model for reliability  
-        "summarization": "gemma4:e4b",  # Good for summarization tasks
-        "general": "gemma4:e4b",  # Default - reliable and fast
-        "wiki_generation": "gemma4:e4b"  # For wiki content generation
-    }
-    
     # OpenAI models optimized for different tasks
     RECOMMENDED_OPENAI_MODELS = {
         "entity_extraction": "gpt-4o-mini",      # Fast and cost-effective for structured tasks
@@ -126,7 +114,8 @@ class LocalLLMService:
         if target_provider == "OPENAI":
             return self.RECOMMENDED_OPENAI_MODELS.get(task, self.RECOMMENDED_OPENAI_MODELS["general"])
         else:
-            return self.RECOMMENDED_MODELS.get(task, self.default_model)
+            # Local work uses the one configured model (LOCAL_LLM_MODEL), for every task
+            return self.default_model
 
     def switch_provider(self, provider: str) -> bool:
         """Switch between LOCAL and OPENAI LLM providers"""

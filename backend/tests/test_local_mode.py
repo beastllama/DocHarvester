@@ -164,3 +164,13 @@ def test_unreachable_llm_raises_instead_of_returning_text(client, monkeypatch):
     llm = LocalLLMService()
     with pytest.raises(Exception, match="Local LLM failed"):
         asyncio.run(llm.query_llm(prompt="hi", max_tokens=20, task_type="general"))
+
+
+def test_local_model_follows_configured_setting(monkeypatch):
+    from backend.services.knowledge_graph.local_llm import LocalLLMService
+
+    monkeypatch.setattr(settings, "local_llm_model", "hermes3:8b")
+    llm = LocalLLMService()
+    llm.current_provider = "LOCAL"
+    assert llm.get_best_model_for_task("entity_extraction") == "hermes3:8b"
+    assert llm.get_best_model_for_task("wiki_generation") == "hermes3:8b"
