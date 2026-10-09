@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from backend.config import settings
 from backend.api import projects, documents, connectors, coverage, auth, admin, wiki, knowledge_graph, progress
 from backend.database import init_db, engine, Base
+from backend.api.mcp_server import mcp_gate, mcp_session_manager
 import logging
 
 # Configure logging
@@ -15,7 +16,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Startup
     await init_db()
-    yield
+    # The MCP session manager can only run once per process, so it starts here and nowhere else
+    async with mcp_session_manager.run():
+        yield
     # Shutdown
     pass
 
@@ -48,6 +51,9 @@ app.include_router(coverage.router, prefix=f"{settings.api_prefix}/coverage", ta
 app.include_router(wiki.router, prefix=f"{settings.api_prefix}/wiki", tags=["wiki"])
 app.include_router(knowledge_graph.router, prefix=f"{settings.api_prefix}/knowledge-graph", tags=["knowledge-graph"])
 app.include_router(progress.router, prefix=f"{settings.api_prefix}/progress", tags=["progress"])
+
+# MCP server for Hermes Agent and other clients. Needs a personal API token (Bearer dh_...)
+app.add_route("/mcp", mcp_gate)
 
 @app.get("/")
 async def root():

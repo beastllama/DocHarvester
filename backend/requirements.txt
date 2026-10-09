@@ -1,14 +1,15 @@
 # Core dependencies
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.2
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.0
 pydantic-settings==2.1.0
-python-multipart==0.0.6
+python-multipart==0.0.32
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.3.0  # passlib 1.7.4 fails on bcrypt 5.x
 email-validator==2.1.0
 httpx==0.25.2
+mcp==2.3.0  # MCP server for Hermes Agent. Needs pydantic 2.12+ and starlette 1.x
 
 # Database
 sqlalchemy==2.0.23
