@@ -256,48 +256,6 @@ services:
           cpus: '0.5'
           memory: 2G
 
-  # Graphiti Service - OPTIMIZED
-  graphiti:
-    build:
-      context: ./graphiti
-      dockerfile: Dockerfile
-    container_name: docharvester-graphiti
-    depends_on:
-      neo4j:
-        condition: service_healthy
-      ollama:
-        condition: service_healthy
-    environment:
-      - NEO4J_URI=bolt://neo4j:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=docharvester123
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - USE_LOCAL_LLM=true
-      - LOCAL_LLM_MODEL=gemma:2b
-      # Performance settings
-      - GRAPHITI_BATCH_SIZE=10
-      - GRAPHITI_TIMEOUT=90
-      - GRAPHITI_MAX_ENTITIES_PER_REQUEST=20
-    ports:
-      - "8001:8000"
-    volumes:
-      - ./graphiti/config:/app/config
-    networks:
-      - docharvester-network
-    deploy:
-      resources:
-        limits:
-          cpus: '1.5'
-          memory: 3G
-        reservations:
-          cpus: '0.5'
-          memory: 1G
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
 volumes:
   postgres_data:
   redis_data:

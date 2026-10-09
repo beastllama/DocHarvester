@@ -27,6 +27,11 @@ os.environ["DATABASE_URL"] = TEST_DB_URL
 os.environ["INGEST_ROOT"] = str(Path(tempfile.gettempdir()) / "dh_ingest_root_test")
 Path(os.environ["INGEST_ROOT"]).mkdir(parents=True, exist_ok=True)
 
+# Knowledge-graph tests need Neo4j. Defaults match a local Neo4j started with this password.
+os.environ.setdefault("NEO4J_URI", "bolt://localhost:7687")
+os.environ.setdefault("NEO4J_USER", "neo4j")
+os.environ.setdefault("NEO4J_PASSWORD", os.getenv("TEST_NEO4J_PASSWORD", "docharvester-test"))
+
 
 @pytest.fixture(scope="session")
 def client():
