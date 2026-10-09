@@ -1,14 +1,26 @@
 """Progress tracking API endpoints"""
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
+from backend.models import ProcessingTask
 from backend.services.progress_tracker import progress_tracker
 from backend.api.auth import get_current_user, User
+from backend.api.deps import get_project_for_user
 
 
 router = APIRouter(tags=["progress"])
+
+
+async def _authorize_task(task_id: int, db: AsyncSession, user: User) -> None:
+    """Raise 404 if the task does not exist, or 403 if the user cannot access its project"""
+    result = await db.execute(select(ProcessingTask.project_id).where(ProcessingTask.id == task_id))
+    project_id = result.scalar_one_or_none()
+    if project_id is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    await get_project_for_user(project_id, db, user)
 
 
 @router.get("/tasks/{task_id}")
@@ -18,6 +30,7 @@ async def get_task_status(
     current_user: User = Depends(get_current_user)
 ):
     """Get the status of a specific task"""
+    await _authorize_task(task_id, db, current_user)
     
     task_status = await progress_tracker.get_task_status(db, task_id)
     
@@ -35,6 +48,7 @@ async def get_project_tasks(
     current_user: User = Depends(get_current_user)
 ):
     """Get all tasks for a project"""
+    await get_project_for_user(project_id, db, current_user)
     
     tasks = await progress_tracker.get_project_tasks(db, project_id, active_only)
     
@@ -52,6 +66,7 @@ async def get_active_operations(
     current_user: User = Depends(get_current_user)
 ):
     """Get all currently active operations for a project with detailed progress"""
+    await get_project_for_user(project_id, db, current_user)
     
     tasks = await progress_tracker.get_project_tasks(db, project_id, active_only=True)
     
@@ -135,6 +150,7 @@ async def cancel_task(
     current_user: User = Depends(get_current_user)
 ):
     """Cancel a running task (if possible)"""
+    await _authorize_task(task_id, db, current_user)
     
     # Note: This is a placeholder - actual cancellation would need to be implemented
     # in the task execution logic (Celery workers, etc.)

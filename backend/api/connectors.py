@@ -1,16 +1,20 @@
+from pathlib import Path
 from typing import List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from pydantic import BaseModel
 
+from backend.config import settings
 from backend.database import get_db
-from backend.models import Project, User
+from backend.models import User
 from backend.api.auth import get_current_user
+from backend.api.deps import get_project_for_user
 from backend.connectors.local_folder import LocalFolderConnector
 
 
 router = APIRouter()
+
+SECRET_KEY_MARKERS = ("password", "secret", "token", "api_key")
 
 
 class ConnectorConfig(BaseModel):
@@ -21,6 +25,31 @@ class ConnectorConfig(BaseModel):
 class ConnectorTestResponse(BaseModel):
     success: bool
     message: str
+
+
+def _ensure_folder_path_in_ingest_root(config: Dict[str, Any]) -> None:
+    """Reject a folder_path that does not resolve inside settings.ingest_root"""
+    if "folder_path" not in config:
+        return
+    try:
+        resolved = Path(config["folder_path"]).resolve()
+    except (TypeError, ValueError, OSError, RuntimeError):
+        raise HTTPException(status_code=400, detail="Invalid folder_path")
+    if not resolved.is_relative_to(Path(settings.ingest_root).resolve()):
+        raise HTTPException(status_code=400, detail="folder_path must be inside the ingest root")
+
+
+def _mask_secrets(value: Any) -> Any:
+    """Replace values whose key looks like a credential with a fixed mask"""
+    if isinstance(value, dict):
+        return {
+            k: "********" if isinstance(k, str) and any(m in k.lower() for m in SECRET_KEY_MARKERS)
+            else _mask_secrets(v)
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_mask_secrets(v) for v in value]
+    return value
 
 
 @router.get("/available")
@@ -80,6 +109,8 @@ async def test_connector(
     current_user: User = Depends(get_current_user)
 ):
     """Test a connector configuration"""
+    # Raised outside the try below so the generic handler does not turn the 400 into a 200
+    _ensure_folder_path_in_ingest_root(connector.config)
     try:
         if connector.connector_type == "local_folder":
             conn = LocalFolderConnector(connector.config)
@@ -116,25 +147,20 @@ async def configure_project_connector(
     current_user: User = Depends(get_current_user)
 ):
     """Configure a connector for a project"""
-    # Get project
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    # Check if user is owner
-    if current_user.email not in project.owners and not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Not authorized to configure connectors for this project")
-    
-    # Update connector config
-    if not project.connector_configs:
-        project.connector_configs = {}
-    
-    project.connector_configs[connector.connector_type] = connector.config
-    
+    project = await get_project_for_user(project_id, db, current_user)
+    _ensure_folder_path_in_ingest_root(connector.config)
+
+    # Keep stored values where the client sent back the masked placeholder
+    existing = dict(project.connector_configs or {})
+    stored = dict(existing.get(connector.connector_type) or {})
+    incoming = {
+        key: (stored[key] if value == "********" and key in stored else value)
+        for key, value in connector.config.items()
+    }
+
+    # Assign a new dict. In-place edits to a JSON column are not saved.
+    project.connector_configs = {**existing, connector.connector_type: incoming}
+
     await db.commit()
     await db.refresh(project)
     
@@ -151,18 +177,11 @@ async def get_project_connectors(
     current_user: User = Depends(get_current_user)
 ):
     """Get configured connectors for a project"""
-    # Get project
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
+    project = await get_project_for_user(project_id, db, current_user)
+
     return {
         "project_id": project_id,
-        "connectors": project.connector_configs or {}
+        "connectors": _mask_secrets(project.connector_configs or {})
     }
 
 
@@ -174,22 +193,14 @@ async def remove_project_connector(
     current_user: User = Depends(get_current_user)
 ):
     """Remove a connector configuration from a project"""
-    # Get project
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    # Check if user is owner
-    if current_user.email not in project.owners and not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Not authorized to configure connectors for this project")
-    
-    # Remove connector config
+    project = await get_project_for_user(project_id, db, current_user)
+
+    # Remove connector config. Assign a new dict so the change is saved.
     if project.connector_configs and connector_type in project.connector_configs:
-        del project.connector_configs[connector_type]
+        project.connector_configs = {
+            key: value for key, value in project.connector_configs.items()
+            if key != connector_type
+        }
         await db.commit()
         
         return {"message": f"Connector '{connector_type}' removed successfully"}

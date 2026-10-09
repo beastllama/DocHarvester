@@ -11,6 +11,7 @@ from backend.database import get_db
 from backend.models import Project, CoverageRequirement, CoverageStatus, Document, DocumentChunk, User
 from backend.models.lens import LensType
 from backend.api.auth import get_current_user
+from backend.api.deps import get_project_for_user
 from backend.workers.coverage_tasks import check_project_coverage
 from backend.workers.generation_tasks import generate_missing_docs
 from backend.config import settings
@@ -71,15 +72,8 @@ async def get_project_requirements(
     current_user: User = Depends(get_current_user)
 ):
     """Get coverage requirements for a project"""
-    # Verify project exists
-    project_result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = project_result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
+    await get_project_for_user(project_id, db, current_user)
+
     # Get requirements
     result = await db.execute(
         select(CoverageRequirement)
@@ -104,6 +98,8 @@ async def update_requirement(
     current_user: User = Depends(get_current_user)
 ):
     """Update a coverage requirement"""
+    await get_project_for_user(project_id, db, current_user)
+
     # Verify lens type is valid
     if lens_type not in [lt.value for lt in LensType]:
         raise HTTPException(status_code=400, detail="Invalid lens type")
@@ -146,15 +142,8 @@ async def get_coverage_status(
     current_user: User = Depends(get_current_user)
 ):
     """Get current coverage status for a project"""
-    # Get project
-    project_result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = project_result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
+    project = await get_project_for_user(project_id, db, current_user)
+
     # Get requirements
     req_result = await db.execute(
         select(CoverageRequirement)
@@ -210,15 +199,8 @@ async def trigger_coverage_check(
     current_user: User = Depends(get_current_user)
 ):
     """Trigger a coverage check for a project"""
-    # Verify project exists
-    project_result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = project_result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
+    await get_project_for_user(project_id, db, current_user)
+
     # Queue coverage check
     check_project_coverage.delay(project_id)
     
@@ -237,15 +219,8 @@ async def generate_missing_documentation(
     current_user: User = Depends(get_current_user)
 ):
     """Generate missing documentation for a project"""
-    # Verify project exists
-    project_result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = project_result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
+    await get_project_for_user(project_id, db, current_user)
+
     # Get current coverage status
     status_result = await db.execute(
         select(CoverageStatus)
@@ -295,6 +270,8 @@ async def get_coverage_gaps(
     current_user: User = Depends(get_current_user)
 ):
     """Get detailed coverage gaps for a project"""
+    await get_project_for_user(project_id, db, current_user)
+
     # Get coverage status
     status_result = await db.execute(
         select(CoverageStatus)

@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { Link as RouterLink } from 'react-router-dom'
 import {
   Box,
   Paper,
@@ -9,7 +8,6 @@ import {
   Typography,
   Container,
   CircularProgress,
-  Link,
 } from '@mui/material'
 import { useAuthStore } from '../stores/authStore'
 
@@ -112,16 +110,8 @@ export default function Login() {
               {isLoading ? <CircularProgress size={24} /> : 'Sign In'}
             </Button>
             
-            <Box sx={{ textAlign: 'center' }}>
-              <Link component={RouterLink} to="/register" variant="body2">
-                Don't have an account? Sign up
-              </Link>
-            </Box>
           </Box>
           
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            Default credentials: admin@docharvester.com / admin123
-          </Typography>
         </Paper>
       </Container>
     </Box>

@@ -159,3 +159,7 @@ __pycache__/
 *.bak
 .env.backup*
 .env.local.backup
+
+# Keep the backend regression suite tracked (overrides the test_*.py rule above)
+!backend/tests/
+!backend/tests/*.py

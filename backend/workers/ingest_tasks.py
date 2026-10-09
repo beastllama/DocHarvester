@@ -18,6 +18,7 @@ from backend.services.classifier import LensClassifier
 from backend.services.embeddings import EmbeddingService
 from backend.services.knowledge_graph.graphiti_client import GraphitiClient, LOGISTICS_ENTITIES
 from backend.services.knowledge_graph.local_llm import LocalLLMService
+from backend.services.knowledge_graph.labels import safe_entity_label
 
 
 # Create database session
@@ -67,6 +68,15 @@ def _discover_and_ingest_project_sync(project_id: int) -> Dict:
         
         # Get connectors from project
         connectors = _get_project_connectors(project)
+        if not connectors:
+            print(f"⚠️ No sources are configured for project {project_id}; nothing to ingest")
+            return {
+                "project_id": project_id,
+                "project_name": project.name,
+                "documents_processed": 0,
+                "errors": 0,
+                "results": []
+            }
         print(f"📁 Found {len(connectors)} connectors to process")
         
         all_results = []
@@ -377,10 +387,11 @@ def _get_project_connectors(project: Project) -> List:
     # if "sharepoint" in project.connector_configs:
     #     connectors.append(SharePointConnector(project.connector_configs["sharepoint"]))
     
-    # Default local folder if no connectors configured (but only if no uploads folder exists)
+    # No sources configured: only the uploads connector exists and its folder is missing or empty.
+    # Return no connectors instead of falling back to the process working directory.
     if len(connectors) == 1:  # Only uploads connector
         if not os.path.exists(uploads_path) or not os.listdir(uploads_path):
-            connectors.append(LocalFolderConnector({"folder_path": "."}))
+            return []
     
     return connectors 
 
@@ -513,7 +524,7 @@ async def _store_entities_in_neo4j(doc: Document, entities: List[Dict], project_
             
             # Create entities and relationships
             for entity in entities:
-                entity_type = entity.get("type", "Entity")
+                entity_type = safe_entity_label(entity.get("type", "Entity"))
                 entity_name = entity.get("name", "Unknown")
                 entity_props = entity.get("properties", {})
                 

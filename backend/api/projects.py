@@ -10,6 +10,7 @@ from backend.database import get_db
 from backend.models import Project, Document, DocumentChunk, User
 from backend.workers.ingest_tasks import discover_and_ingest_project
 from backend.api.auth import get_current_user
+from backend.api.deps import accessible_project_ids, get_project_for_user, is_project_member
 
 
 router = APIRouter()
@@ -63,11 +64,15 @@ async def list_projects(
 ):
     """List all projects with stats"""
     # Build query with document count
+    ids = await accessible_project_ids(db, current_user)
     query = select(
         Project,
         func.count(Document.id).label('document_count')
-    ).outerjoin(Document).group_by(Project.id)
-    
+    ).outerjoin(Document)
+    if ids is not None:
+        query = query.where(Project.id.in_(ids))
+    query = query.group_by(Project.id)
+
     result = await db.execute(query.offset(skip).limit(limit))
     projects = []
     
@@ -143,6 +148,8 @@ async def get_project(
     current_user: User = Depends(get_current_user)
 ):
     """Get project details"""
+    await get_project_for_user(project_id, db, current_user)
+
     # Get project with document count
     query = select(
         Project,
@@ -178,16 +185,12 @@ async def update_project(
     current_user: User = Depends(get_current_user)
 ):
     """Update project details"""
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
+    project = await get_project_for_user(project_id, db, current_user)
+
     # Update fields
     update_data = project_update.dict(exclude_unset=True)
+    if not current_user.is_admin and ("owners" in update_data or "connector_configs" in update_data):
+        raise HTTPException(status_code=403, detail="Only admins can change owners or connector configs")
     for field, value in update_data.items():
         setattr(project, field, value)
     
@@ -223,7 +226,7 @@ async def delete_project(
         raise HTTPException(status_code=404, detail="Project not found")
     
     # Check if user is owner or admin
-    if current_user.email not in project.owners and not current_user.is_admin:
+    if not is_project_member(project, current_user):
         raise HTTPException(status_code=403, detail="Not authorized to delete this project")
     
     await db.delete(project)
@@ -239,14 +242,8 @@ async def get_project_stats(
     current_user: User = Depends(get_current_user)
 ):
     """Get detailed project statistics"""
-    # Verify project exists
-    project_result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = project_result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Verify project exists and the user may access it
+    await get_project_for_user(project_id, db, current_user)
     
     # Get document stats
     doc_stats = await db.execute(
@@ -317,14 +314,8 @@ async def start_ingestion(
     current_user: User = Depends(get_current_user)
 ):
     """Start document ingestion for a project"""
-    # Verify project exists
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Verify project exists and the user may access it
+    await get_project_for_user(project_id, db, current_user)
     
     # Queue ingestion task
     task = discover_and_ingest_project.delay(project_id)
@@ -344,14 +335,8 @@ async def get_ingestion_status(
     current_user: User = Depends(get_current_user)
 ):
     """Get the status of recent ingestion tasks"""
-    # Verify project exists
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Verify project exists and the user may access it
+    await get_project_for_user(project_id, db, current_user)
     
     # For now, return a simple status based on recent document activity
     # In a full implementation, you'd track task status in Redis or database
@@ -389,15 +374,9 @@ async def upload_documents(
     """Upload documents directly to a project"""
     import os
     from pathlib import Path
-    
-    # Verify project exists
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Verify project exists and the user may access it
+    await get_project_for_user(project_id, db, current_user)
     
     # Create upload directory if it doesn't exist
     upload_dir = Path("/app/uploads") / str(project_id)
@@ -408,7 +387,9 @@ async def upload_documents(
     for file in files:
         # Generate unique filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_filename = f"{timestamp}_{file.filename}"
+        # Keep only the base name so a client path like ../x cannot leave the upload folder
+        base_name = Path(file.filename or "upload").name or "upload"
+        safe_filename = f"{timestamp}_{base_name}"
         file_path = upload_dir / safe_filename
         
         # Save file
@@ -423,7 +404,7 @@ async def upload_documents(
             title=file.filename,
             source_type="upload",
             source_url=str(file_path),
-            file_type=file.filename.split('.')[-1].lower() if '.' in file.filename else 'unknown',
+            file_type=base_name.split('.')[-1].lower() if '.' in base_name else 'unknown',
             source_meta={
                 "original_name": file.filename,
                 "size": len(content),

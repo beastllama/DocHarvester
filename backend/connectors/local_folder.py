@@ -11,15 +11,25 @@ import markdown
 import yaml
 import json
 
+from backend.config import settings
 from .base import BaseConnector, SearchResult
 
 
 class LocalFolderConnector(BaseConnector):
     """Connector for ingesting documents from local folders"""
-    
+
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        self.folder_path = Path(config.get("folder_path", "."))
+        folder = config.get("folder_path")
+        if not folder:
+            raise ValueError("Local folder connector requires a folder_path; none was configured")
+        resolved = Path(folder).resolve()
+        ingest_root = Path(settings.ingest_root).resolve()
+        if not resolved.is_relative_to(ingest_root):
+            raise ValueError(
+                f"Folder {resolved} is outside the allowed ingest root {ingest_root}"
+            )
+        self.folder_path = resolved
         self.allowed_extensions = config.get("allowed_extensions", [
             ".txt", ".md", ".pdf", ".docx", ".html", 
             ".json", ".yml", ".yaml", ".py", ".js", ".ts"

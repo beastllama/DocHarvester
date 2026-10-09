@@ -135,15 +135,17 @@ npm start
 ```
 
 ### Testing
+The backend suite runs against a real Postgres with pgvector. It drops and recreates
+tables, so it only runs on a database whose name ends in `_test`.
+
 ```bash
-# Backend tests
-cd backend && python -m pytest
+createdb docharvester_test
+psql -d docharvester_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+export TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/docharvester_test
+pytest
 
-# Frontend tests
-cd frontend && npm test
-
-# Integration tests
-python test_optimized_system.py
+# Frontend type check and build
+cd frontend && npm run build
 ```
 
 ## �️ Architecture Details

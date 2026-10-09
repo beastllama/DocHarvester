@@ -5,8 +5,6 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: docharvester
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -27,8 +25,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     networks:
@@ -51,8 +47,6 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: docharvester-ollama
-    ports:
-      - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     networks:
@@ -83,9 +77,10 @@ services:
       context: .
       dockerfile: docker/Dockerfile.backend
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
-      - env.optimized  # Use optimized configuration
+      - env.optimized  # Template defaults
+      - .env  # Your real values (required, overrides the defaults above)
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/docharvester
       REDIS_URL: redis://redis:6379/0
@@ -134,7 +129,8 @@ services:
       dockerfile: docker/Dockerfile.backend
     command: celery -A backend.workers.celery_app worker --loglevel=info --concurrency=2 --max-tasks-per-child=100
     env_file:
-      - env.optimized  # Use optimized configuration
+      - env.optimized  # Template defaults
+      - .env  # Your real values (required, overrides the defaults above)
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/docharvester
       REDIS_URL: redis://redis:6379/0
@@ -177,6 +173,7 @@ services:
     command: celery -A backend.workers.celery_app beat --loglevel=info
     env_file:
       - env.optimized
+      - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/docharvester
       REDIS_URL: redis://redis:6379/0
@@ -227,8 +224,7 @@ services:
     image: neo4j:5.15.0
     container_name: docharvester-neo4j
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "127.0.0.1:7474:7474"
     environment:
       - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-secure_default_password}
       - NEO4J_dbms_memory_heap_initial__size=512m
@@ -260,7 +256,7 @@ services:
       dockerfile: Dockerfile
     container_name: docharvester-graphiti
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     environment:
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
