@@ -61,7 +61,7 @@ print_status "Docker Compose configuration updated"
 # Step 5: Clean up Docker resources
 echo ""
 echo "🧹 Cleaning up Docker resources..."
-docker system prune -f --volumes
+docker system prune -f
 print_status "Docker cleanup completed"
 
 # Step 6: Rebuild and start services

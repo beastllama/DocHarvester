@@ -1,6 +1,6 @@
 from typing import Optional, List, Literal, Dict
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 import os
 import json
 
@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     
     # API settings
     api_prefix: str = "/api/v1"
-    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:8000", "http://localhost:5173", "http://localhost:5174", "*"]
+    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:8000", "http://localhost:5173", "http://localhost:5174"]
     
     # Database settings
     database_url: str = Field(
@@ -129,10 +129,13 @@ class Settings(BaseSettings):
     
     # Security
     secret_key: str = Field(
-        default="your-secret-key-here-change-in-production",
-        description="Secret key for JWT tokens"
+        default="",
+        description="Secret key for JWT tokens. Required. Set SECRET_KEY in .env"
     )
     access_token_expire_minutes: int = 30
+
+    # Local folder connector may only read inside this root
+    ingest_root: str = os.getenv("INGEST_ROOT", "/app/uploads")
     
     # Knowledge Graph settings
     enable_knowledge_graph: bool = os.getenv("ENABLE_KNOWLEDGE_GRAPH", "true").lower() == "true"
@@ -156,6 +159,16 @@ class Settings(BaseSettings):
     # Wiki generation settings
     wiki_generation_enabled: bool = os.getenv("WIKI_GENERATION_ENABLED", "true").lower() == "true"
     
+    @model_validator(mode='after')
+    def require_real_secret(self):
+        """Refuse to start with a missing or placeholder JWT secret"""
+        if not self.secret_key or self.secret_key.startswith("your-"):
+            raise ValueError(
+                "SECRET_KEY is not set. Add a real random value to .env, "
+                "for example: openssl rand -hex 32"
+            )
+        return self
+
     @field_validator('allowed_file_types', 'allowed_extensions', mode='before')
     @classmethod
     def parse_allowed_file_types(cls, v):

@@ -100,9 +100,12 @@ async def get_current_user(
 @router.post("/register", response_model=UserResponse)
 async def register(
     user_create: UserCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Register a new user"""
+    """Create a new user. Admins only."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only admins can create accounts")
     # Check if user exists
     result = await db.execute(
         select(User).where(User.email == user_create.email)
@@ -118,15 +121,12 @@ async def register(
     # Create new user
     hashed_password = get_password_hash(user_create.password)
     
-    # First user is admin
-    result = await db.execute(select(User).limit(1))
-    is_first_user = result.scalar_one_or_none() is None
     
     user = User(
         email=user_create.email,
         hashed_password=hashed_password,
         full_name=user_create.full_name,
-        is_admin=is_first_user
+        is_admin=False
     )
     
     db.add(user)
