@@ -370,6 +370,11 @@ class ApiClient {
     return response.data
   }
 
+  async getMcpInfo(): Promise<{ mcp_url: string; shared: boolean }> {
+    const response = await this.client.get('/auth/mcp-info')
+    return response.data
+  }
+
   async revokeApiToken(id: number): Promise<void> {
     await this.client.delete(`/auth/tokens/${id}`)
   }

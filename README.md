@@ -201,33 +201,18 @@ EMBEDDING_DIMENSION=768
 
 ## 🤖 Hermes Agent (MCP)
 
-Hermes Agent can search your projects through a read-only MCP server at `/mcp`. Each call uses the token's user, so Hermes sees only what that user can see.
+Let Hermes search your DocHarvester projects. 3 steps:
 
-1. Log in with your password and create a token. The value is shown once:
-   ```bash
-   curl -X POST http://localhost:8000/api/v1/auth/tokens \
-     -H "Authorization: Bearer YOUR_LOGIN_TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{"name": "hermes"}'
-   ```
-2. Add this to `~/.hermes/config.yaml`:
-   ```yaml
-   mcp_servers:
-     docharvester:
-       url: "http://localhost:8000/mcp"
-       headers:
-         Authorization: "Bearer dh_your_token_here"
-       tools:
-         include: ["list_projects", "search_documents", "get_document", "get_wiki_page", "related_entities"]
-   ```
-3. Optional: use the same local model for Hermes chat. Pull it, then set `LOCAL_LLM_MODEL=hermes3:8b`:
-   ```bash
-   docker compose exec ollama ollama pull hermes3:8b
-   ```
+1. **Share it** (once, on the DocHarvester computer). Windows: double-click `scripts/connect-tailscale.bat`. Mac/Linux: `scripts/connect-tailscale.sh`.
+2. **Get the config.** In DocHarvester: click your avatar → **API tokens** → **Create token** → **Copy** the config.
+3. **Give it to Hermes.** Paste into `~/.hermes/config.yaml` on the Hermes computer. Restart Hermes.
 
-- Tools: `list_projects`, `search_documents`, `get_document`, `get_wiki_page`, `related_entities`. There are no write tools.
-- Revoke a token with `DELETE /api/v1/auth/tokens/{id}`. It stops working on the next request.
-- The server accepts only `localhost` and `127.0.0.1` as host names (MCP DNS-rebinding protection). Hermes must connect from the same machine.
+Test: ask Hermes "list my DocHarvester projects".
+
+- Only computers on your Tailscale network can reach it. Hermes sees only what your account can see. It can't change anything.
+- Hermes on the same computer? Skip step 1.
+- Tailscale shows a link to turn on HTTPS? Open it, click Enable, run step 1 again.
+- Lost access? API tokens → **Revoke**.
 
 ## 🔒 Security
 

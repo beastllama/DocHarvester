@@ -20,13 +20,12 @@ import {
 import { ContentCopy } from '@mui/icons-material'
 import { api, ApiToken } from '../services/api'
 
-const MCP_URL = 'http://localhost:8000/mcp'
 const TOOLS = '["list_projects", "search_documents", "get_document", "get_wiki_page", "related_entities"]'
 
-function hermesConfig(token: string) {
+function hermesConfig(mcpUrl: string, token: string) {
   return `mcp_servers:
   docharvester:
-    url: "${MCP_URL}"
+    url: "${mcpUrl}"
     headers:
       Authorization: "Bearer ${token}"
     tools:
@@ -68,6 +67,7 @@ export default function ApiTokens() {
   const [error, setError] = useState<string | null>(null)
   const [toRevoke, setToRevoke] = useState<ApiToken | null>(null)
   const cancelRef = useRef<HTMLButtonElement>(null)
+  const [mcp, setMcp] = useState({ mcp_url: 'http://localhost:8000/mcp', shared: false })
 
   const load = async () => {
     try {
@@ -79,6 +79,7 @@ export default function ApiTokens() {
 
   useEffect(() => {
     load()
+    api.getMcpInfo().then(setMcp).catch(() => {})
   }, [])
 
   const create = async () => {
@@ -121,6 +122,12 @@ export default function ApiTokens() {
         </Typography>
       </Box>
 
+      {!mcp.shared && (
+        <Alert severity="info">
+          Hermes on another computer? On this computer, run <b>scripts/connect-tailscale</b> once.
+        </Alert>
+      )}
+
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
 
       <Paper sx={{ p: 3 }}>
@@ -143,7 +150,7 @@ export default function ApiTokens() {
           <Stack spacing={2}>
             <Alert severity="warning">Copy it now. You won't see this token again.</Alert>
             <CopyBlock label="Token" text={created} />
-            <CopyBlock label="Paste into ~/.hermes/config.yaml, then restart Hermes" text={hermesConfig(created)} />
+            <CopyBlock label="Paste into ~/.hermes/config.yaml, then restart Hermes" text={hermesConfig(mcp.mcp_url, created)} />
             <Button onClick={() => setCreated(null)} sx={{ alignSelf: 'flex-start', minHeight: 48 }}>
               Done, I saved it
             </Button>

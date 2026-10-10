@@ -305,3 +305,27 @@ def test_mcp_refuses_connection_without_a_token(live_url):
         _run_mcp(live_url, None, lambda session: session.list_tools())
     leaves = _leaves(info.value)
     assert leaves and all(isinstance(leaf, MCPError) for leaf in leaves), leaves
+
+
+def test_mcp_accepts_a_tailscale_host_name_with_a_token(client, world):
+    """Hermes on another machine connects by its Tailscale name, not localhost."""
+    headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json",
+               "Host": "beastllama.tail1234.ts.net",
+               "Authorization": f"Bearer {world['owner_token']}"}
+    body = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-11-25", "capabilities": {},
+                       "clientInfo": {"name": "t", "version": "0"}}}
+    r = client.post("/mcp", headers=headers, json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["result"]["serverInfo"]["name"] == "DocHarvester"
+
+
+def test_mcp_info_gives_the_shared_address(client, world, monkeypatch):
+    from backend.config import settings
+
+    r = client.get("/api/v1/auth/mcp-info", headers=world["owner_login"])
+    assert r.json() == {"mcp_url": "http://localhost:8000/mcp", "shared": False}
+
+    monkeypatch.setattr(settings, "public_url", "https://beastllama.tail1234.ts.net/")
+    r = client.get("/api/v1/auth/mcp-info", headers=world["owner_login"])
+    assert r.json() == {"mcp_url": "https://beastllama.tail1234.ts.net/mcp", "shared": True}

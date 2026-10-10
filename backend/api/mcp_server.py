@@ -9,6 +9,7 @@ from typing import Optional, Tuple
 from mcp.server import MCPServer
 from mcp.server.mcpserver.context import Context
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
@@ -152,7 +153,14 @@ async def related_entities(ctx: Context, project_id: int, entity: str, limit: in
 
 # Stateless: each request is self-contained, so no session state is kept between calls.
 # The app is mounted at /mcp in main.py. Its session manager must run inside the app lifespan.
-mcp_app = mcp.streamable_http_app(stateless_http=True, json_response=True)
+# Host checking is off so Hermes can connect by any name (a Tailscale name, an IP).
+# That check guards against DNS rebinding, which works only on servers with no auth.
+# Here every request needs an API token, and a browser on a rebound page cannot send one.
+mcp_app = mcp.streamable_http_app(
+    stateless_http=True,
+    json_response=True,
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 mcp_session_manager = mcp.session_manager
 
 

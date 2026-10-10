@@ -217,6 +217,13 @@ def _token_info(row: ApiToken) -> ApiTokenInfo:
     )
 
 
+@router.get("/mcp-info")
+async def mcp_info(current_user: User = Depends(get_current_user)):
+    """Where MCP clients such as Hermes should connect"""
+    base = (settings.public_url or "http://localhost:8000").rstrip("/")
+    return {"mcp_url": f"{base}/mcp", "shared": bool(settings.public_url)}
+
+
 @router.post("/tokens", response_model=ApiTokenCreated)
 async def create_token(
     payload: ApiTokenCreate,
