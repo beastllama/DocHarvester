@@ -26,6 +26,7 @@ import {
   Logout,
   Person,
   Settings,
+  Key,
 } from '@mui/icons-material'
 import { useAuthStore } from '../stores/authStore'
 
@@ -141,6 +142,13 @@ export default function Layout() {
                   <Person fontSize="small" />
                 </ListItemIcon>
                 <ListItemText>{user?.email}</ListItemText>
+              </MenuItem>
+              <Divider />
+              <MenuItem onClick={() => { handleClose(); navigate('/tokens') }}>
+                <ListItemIcon>
+                  <Key fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>API tokens</ListItemText>
               </MenuItem>
               <Divider />
               {user?.is_admin && (

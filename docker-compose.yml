@@ -108,6 +108,7 @@ services:
       - ./backend:/app/backend
       - ./coverage.yml:/app/coverage.yml
       - uploads_data:/app/uploads
+      - ${OBSIDIAN_VAULT_PATH:-./empty-vault}:/app/uploads/obsidian:ro  # Obsidian vault, read-only
     networks:
       - docharvester-network
     deploy:
@@ -157,6 +158,7 @@ services:
       - ./backend:/app/backend
       - ./coverage.yml:/app/coverage.yml
       - uploads_data:/app/uploads
+      - ${OBSIDIAN_VAULT_PATH:-./empty-vault}:/app/uploads/obsidian:ro  # Obsidian vault, read-only
     networks:
       - docharvester-network
     deploy:
