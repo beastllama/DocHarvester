@@ -135,6 +135,10 @@ class Settings(BaseSettings):
     )
     access_token_expire_minutes: int = 30
 
+    # Address other machines use to reach this backend, e.g. https://beastllama.tail1234.ts.net
+    # Set by scripts/connect-tailscale. Shown in the API tokens page so the Hermes config is right.
+    public_url: str = ""
+
     # Local folder connector may only read inside this root
     ingest_root: str = os.getenv("INGEST_ROOT", "/app/uploads")
     
