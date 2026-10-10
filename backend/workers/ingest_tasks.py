@@ -28,6 +28,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "neo4j_default_password")
 
 
+# Upper bound on documents read from one connector per ingest run. Vaults and repos often pass 100.
+MAX_DOCUMENTS_PER_CONNECTOR = 5000
+
 @celery_app.task(name="backend.workers.ingest_tasks.discover_and_ingest_project")
 def discover_and_ingest_project(project_id: int) -> Dict:
     """
@@ -92,12 +95,12 @@ def _discover_and_ingest_project_sync(project_id: int) -> Dict:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         # If loop is already running, create a new one
-                        search_results = asyncio.run(connector.search("", limit=100))
+                        search_results = asyncio.run(connector.search("", limit=MAX_DOCUMENTS_PER_CONNECTOR))
                     else:
-                        search_results = loop.run_until_complete(connector.search("", limit=100))
+                        search_results = loop.run_until_complete(connector.search("", limit=MAX_DOCUMENTS_PER_CONNECTOR))
                 except:
                     # Fallback: create new event loop
-                    search_results = asyncio.run(connector.search("", limit=100))
+                    search_results = asyncio.run(connector.search("", limit=MAX_DOCUMENTS_PER_CONNECTOR))
                 
                 print(f"📄 Found {len(search_results)} documents to process")
                 

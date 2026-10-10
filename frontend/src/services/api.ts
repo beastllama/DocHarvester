@@ -358,6 +358,29 @@ class ApiClient {
     const response = await this.client.get(`/connectors/project/${project_id}/configurations`)
     return response.data
   }
+
+  // Personal API tokens (for Hermes Agent and other MCP clients)
+  async getApiTokens(): Promise<ApiToken[]> {
+    const response = await this.client.get('/auth/tokens')
+    return response.data
+  }
+
+  async createApiToken(name: string): Promise<ApiToken & { token: string }> {
+    const response = await this.client.post('/auth/tokens', { name })
+    return response.data
+  }
+
+  async revokeApiToken(id: number): Promise<void> {
+    await this.client.delete(`/auth/tokens/${id}`)
+  }
+}
+
+export interface ApiToken {
+  id: number
+  name: string
+  created_at: string
+  last_used_at?: string | null
+  revoked_at?: string | null
 }
 
 // Export singleton instance

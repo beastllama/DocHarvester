@@ -9,6 +9,7 @@ import ProjectDetail from './pages/ProjectDetail'
 import Wiki from './pages/Wiki'
 import Coverage from './pages/Coverage'
 import Documents from './pages/Documents'
+import ApiTokens from './pages/ApiTokens'
 import AdminLayout from './pages/admin/AdminLayout'
 import AdminDashboard from './pages/admin/Dashboard'
 import AdminUsers from './pages/admin/Users'
@@ -38,6 +39,7 @@ function App() {
         <Route path="projects/:projectId/wiki" element={<Wiki />} />
         <Route path="coverage" element={<Coverage />} />
         <Route path="documents" element={<Documents />} />
+        <Route path="tokens" element={<ApiTokens />} />
       </Route>
 
       {/* Admin routes */}

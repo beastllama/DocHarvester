@@ -190,6 +190,15 @@ EMBEDDING_DIMENSION=768
 - Changing the embedding model or the dimension means re-embedding: `python backend/scripts/reembed.py`.
 - Provider switches made in the admin screen are stored in the database, so the workers follow them.
 
+## 📓 Use your Obsidian vault
+
+1. Set `OBSIDIAN_VAULT_PATH` in `.env` (Windows example: `E:/Obsidian/MyVault`), then `docker compose up -d`.
+2. The vault is mounted read-only at `/app/uploads/obsidian`. Add a Local folder connector to a project with that path, then run ingest.
+
+- `.obsidian/`, `.trash/` and other hidden folders are skipped.
+- Frontmatter is removed from the text. `tags` and `aliases` are kept as metadata.
+- `[[Note|Alias]]` reads as "Alias". Link targets are kept in `source_meta.links`.
+
 ## 🤖 Hermes Agent (MCP)
 
 Hermes Agent can search your projects through a read-only MCP server at `/mcp`. Each call uses the token's user, so Hermes sees only what that user can see.
